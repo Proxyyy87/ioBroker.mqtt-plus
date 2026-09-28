@@ -96,7 +96,7 @@
       "zh-cn": "ioBroker 状态与 MQTT 之间的桥接，支持 JSON 导出和远程同步"
     },
     "authors": [
-      "proxy <zumloeschen@ich.ms>"
+      "proxy <proxy@ich.ms>"
     ],
     "keywords": [
       "mqtt",

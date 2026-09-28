@@ -2,7 +2,7 @@
   "name": "iobroker.mqtt-plus",
   "version": "1.6.5",
   "description": "Bridge between ioBroker states and MQTT with JSON export and Remote Sync",
-  "author": "proxy <zumloeschen@ich.ms>",
+  "author": "proxy <proxy@ich.ms>",
   "license": "MIT",
   "homepage": "https://github.com/Proxyyy87/ioBroker.mqtt-plus#readme",
   "repository": {
