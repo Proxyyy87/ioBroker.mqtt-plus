@@ -1,18 +1,18 @@
 {
-  "i18n": false,
+  "i18n": true,
   "type": "tabs",
   "items": {
     "main": {
       "type": "panel",
-      "label": "Einstellungen & Routen",
+      "label": "Settings & routes",
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTMgMTNIMXYtMmgydjJ6bTA-MmgydjJIN1YzHptMTQgMTlIMXYtMmgydjJ6bTQtMmgydjJIN1YxN3ptNCAwaC0ydjJoMnYtMnoiLz48L3N2Zz4=",
       "items": {
         "targetBasePath": {
           "type": "text",
-          "label": "MQTT Ziel-Pfad (Prefix)",
+          "label": "MQTT target path (prefix)",
           "default": "mqtt.0.",
           "sm": 6,
-          "help": "Muss auf . enden! Bsp: mqtt.0.",
+          "help": "Must end with a dot, e.g. mqtt.0.",
           "xs": 12,
           "md": 6,
           "lg": 6,
@@ -20,7 +20,7 @@
         },
         "updateIntervalSec": {
           "type": "number",
-          "label": "Update Intervall (s)",
+          "label": "Update interval (s)",
           "default": 30,
           "sm": 3,
           "xs": 12,
@@ -30,7 +30,7 @@
         },
         "logTransfers": {
           "type": "checkbox",
-          "label": "Log Aktiv",
+          "label": "Log transfers",
           "default": true,
           "sm": 3,
           "xs": 12,
@@ -40,10 +40,10 @@
         },
         "forceSyncIntervalMin": {
           "type": "number",
-          "label": "Force-Sync Intervall (Min, 0 = aus)",
+          "label": "Force sync interval (min, 0 = off)",
           "default": 5,
           "sm": 3,
-          "help": "Vergleicht Quelle und Ziel und schreibt nur Abweichungen - Mappings im Sync-Modus \"Force\" werden immer neu geschrieben.",
+          "help": "Compares source and target and only writes deviations - mappings in sync mode \"Force\" are always rewritten.",
           "xs": 12,
           "md": 3,
           "lg": 3,
@@ -51,11 +51,11 @@
         },
         "staleAfterMin": {
           "type": "number",
-          "label": "Aktualitätsgrenze (Min, 0 = aus)",
+          "label": "Staleness limit (min, 0 = off)",
           "default": 1440,
           "min": 0,
           "sm": 3,
-          "help": "Quellen, deren letztes Update älter ist (oder mit Qualität q≠0), werden bei Start, Update-Intervall und Force-Sync nicht gespiegelt - ein inaktives Gerät wird so auf der Zielseite nicht wieder \"frisch\". Echte Änderungs-Ereignisse gehen immer durch. Standard: 1440 (24 h).",
+          "help": "Sources whose last update is older (or with quality q≠0) are not mirrored on start, update interval and force sync - so an inactive device does not become \"fresh\" again on the target side. Real change events always pass. Default: 1440 (24 h).",
           "xs": 12,
           "md": 3,
           "lg": 3,
@@ -72,7 +72,7 @@
             {
               "type": "objectId",
               "attr": "id",
-              "label": "Quell-ID (ioBroker)",
+              "label": "Source ID (ioBroker)",
               "xs": 12,
               "sm": 12,
               "md": 6,
@@ -82,7 +82,7 @@
             {
               "type": "text",
               "attr": "mqttName",
-              "label": "Pfad Suffix (z.B. home/küche/licht)",
+              "label": "Path suffix (e.g. home/kitchen/light)",
               "xs": 12,
               "sm": 12,
               "md": 6,
@@ -92,7 +92,7 @@
             {
               "type": "select",
               "attr": "dir",
-              "label": "Richtung",
+              "label": "Direction",
               "options": [
                 {
                   "value": "out",
@@ -104,7 +104,7 @@
                 },
                 {
                   "value": "both",
-                  "label": "Beide"
+                  "label": "Both"
                 }
               ],
               "default": "out",
@@ -117,15 +117,15 @@
             {
               "type": "select",
               "attr": "topicMode",
-              "label": "MQTT-Topic-Modus",
+              "label": "MQTT topic mode",
               "options": [
                 {
                   "value": "single",
-                  "label": "Single (ein Topic)"
+                  "label": "Single (one topic)"
                 },
                 {
                   "value": "dual",
-                  "label": "Dual (Befehl auf /set)"
+                  "label": "Dual (command on /set)"
                 }
               ],
               "default": "single",
@@ -134,12 +134,12 @@
               "md": 4,
               "lg": 2,
               "xl": 2,
-              "help": "Dual: Befehle auf <topic>/set"
+              "help": "Dual: commands on <topic>/set"
             },
             {
               "type": "text",
               "attr": "commandSuffix",
-              "label": "Befehls-Suffix",
+              "label": "Command suffix",
               "default": "/set",
               "xs": 12,
               "sm": 6,
@@ -151,7 +151,7 @@
             {
               "type": "select",
               "attr": "type",
-              "label": "Typ",
+              "label": "Type",
               "options": [
                 {
                   "value": "auto",
@@ -159,7 +159,7 @@
                 },
                 {
                   "value": "round",
-                  "label": "Runden"
+                  "label": "Round"
                 },
                 {
                   "value": "boolToNum",
@@ -181,7 +181,7 @@
             {
               "type": "number",
               "attr": "decimals",
-              "label": "Nachkommastellen",
+              "label": "Decimals",
               "default": 2,
               "xs": 12,
               "sm": 6,
@@ -193,7 +193,7 @@
             {
               "type": "text",
               "attr": "unit",
-              "label": "Einheit",
+              "label": "Unit",
               "xs": 12,
               "sm": 6,
               "md": 2,
@@ -203,15 +203,15 @@
             {
               "type": "select",
               "attr": "ackFilter",
-              "label": "Ack-Filter",
+              "label": "Ack filter",
               "options": [
                 {
                   "value": "confirmed",
-                  "label": "Nur bestätigt (ack=true)"
+                  "label": "Confirmed only (ack=true)"
                 },
                 {
                   "value": "any",
-                  "label": "Auch unbestätigt (userdata/alias)"
+                  "label": "Also unconfirmed (userdata/alias)"
                 }
               ],
               "default": "confirmed",
@@ -220,25 +220,25 @@
               "md": 4,
               "lg": 3,
               "xl": 3,
-              "help": "\"Auch unbestätigt\" für 0_userdata/alias"
+              "help": "\"Also unconfirmed\" for 0_userdata/alias"
             },
             {
               "type": "number",
               "attr": "staleAfterMin",
-              "label": "Aktualität (Min)",
+              "label": "Staleness (min)",
               "min": 0,
               "xs": 12,
               "sm": 6,
               "md": 3,
               "lg": 2,
               "xl": 2,
-              "help": "leer = global, 0 = aus",
+              "help": "empty = global, 0 = off",
               "hidden": "data.syncMode === 'force'"
             },
             {
               "type": "select",
               "attr": "syncMode",
-              "label": "Sync-Modus",
+              "label": "Sync mode",
               "default": "standard",
               "xs": 12,
               "sm": 6,
@@ -248,18 +248,18 @@
               "options": [
                 {
                   "value": "standard",
-                  "label": "Standard (nur Änderungen)"
+                  "label": "Standard (changes only)"
                 },
                 {
                   "value": "refresh",
-                  "label": "Jede Meldung weiterreichen"
+                  "label": "Pass every update"
                 },
                 {
                   "value": "force",
-                  "label": "Force wie vor 1.6.0"
+                  "label": "Force (as before 1.6.0)"
                 }
               ],
-              "help": "Siehe Hilfe: Sync-Modus"
+              "help": "See documentation: sync mode"
             }
           ],
           "xs": 12,
@@ -271,21 +271,21 @@
     },
     "webTab": {
       "type": "panel",
-      "label": "Web Dashboard",
+      "label": "Web dashboard",
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTE0IDJINkM0Ljg5IDIgNCAyLjg5IDQgNHYxNmMwIDEuMTEuODkgMiAyIDJoMTJjMS4xMSAwIDItLjg5IDItMlY4bC02LTZ6bS0xIDlIN3YtMmg2djJ6bTMgN0g3di0yaDEwdjJ6bTAtNEg3di0yaDEwdjJ6Ii8+PC9zdmc+",
       "items": {
         "webInfo": {
           "type": "staticText",
-          "text": "Der Adapter stellt ein Web-Interface für Backup/Restore und Status bereit. Nutzen Sie den Link in der Instanz-Übersicht.",
+          "text": "The adapter provides a web interface for backup/restore and status. Use the link in the instance overview.",
           "sm": 12,
           "xs": 12,
           "md": 12,
           "lg": 12,
           "xl": 12
         },
-        "serverPort": {
+        "port": {
           "type": "number",
-          "label": "Webserver Port",
+          "label": "Web server port",
           "default": 8095,
           "sm": 4,
           "xs": 12,
@@ -293,19 +293,19 @@
           "lg": 4,
           "xl": 4
         },
-        "bindHost": {
+        "bind": {
           "type": "select",
-          "label": "Bind-Interface",
+          "label": "Bind interface",
           "default": "0.0.0.0",
           "sm": 4,
           "options": [
             {
               "value": "0.0.0.0",
-              "label": "Alle Interfaces (LAN erreichbar)"
+              "label": "All interfaces (reachable from LAN)"
             },
             {
               "value": "127.0.0.1",
-              "label": "Nur lokal (127.0.0.1)"
+              "label": "Local only (127.0.0.1)"
             }
           ],
           "xs": 12,
@@ -315,7 +315,7 @@
         },
         "dashboardUser": {
           "type": "text",
-          "label": "Dashboard Benutzername",
+          "label": "Dashboard user name",
           "default": "admin",
           "sm": 4,
           "xs": 12,
@@ -325,9 +325,9 @@
         },
         "dashboardPassword": {
           "type": "password",
-          "label": "Dashboard Passwort",
+          "label": "Dashboard password",
           "sm": 4,
-          "help": "Leer lassen = kein Zugangsschutz (nicht empfohlen). Wird per HTTP Basic-Auth abgefragt.",
+          "help": "Leave empty = no access protection (not recommended). Requested via HTTP basic auth.",
           "xs": 12,
           "md": 4,
           "lg": 4,
@@ -335,9 +335,9 @@
         },
         "dashboardTlsCert": {
           "type": "text",
-          "label": "TLS-Zertifikat (PEM, optional)",
+          "label": "TLS certificate (PEM, optional)",
           "sm": 6,
-          "help": "Mit TLS-Key zusammen gesetzt: Dashboard läuft über HTTPS statt HTTP, Zugangsdaten werden verschlüsselt übertragen.",
+          "help": "Set together with the TLS key: the dashboard runs via HTTPS instead of HTTP, credentials are transmitted encrypted.",
           "minRows": 6,
           "maxRows": 12,
           "xs": 12,
@@ -347,9 +347,9 @@
         },
         "dashboardTlsKey": {
           "type": "text",
-          "label": "TLS-Key (PEM, optional)",
+          "label": "TLS key (PEM, optional)",
           "sm": 6,
-          "help": "Privater Schlüssel zum obigen Zertifikat. Leer lassen = HTTP (unverschlüsselt). Wird verschlüsselt gespeichert (encryptedNative).",
+          "help": "Private key for the certificate above. Leave empty = HTTP (unencrypted). Stored encrypted (encryptedNative).",
           "minRows": 6,
           "maxRows": 12,
           "xs": 12,
@@ -361,14 +361,14 @@
     },
     "syncTab": {
       "type": "panel",
-      "label": "Remote Sync",
+      "label": "Remote sync",
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTE5LjM1IDEwLjA0QzE4LjY3IDYuNTkgMTUuNjQgNCAxMiA0IDkuMTEgNCA2LjYgNS42NCA1LjM1IDguMDQgMi4zNCA4LjM2IDAgMTAuOTEgMCAxNGMwIDMuMzEgMi42OSA2IDYgNmgxM2MzLjMxIDAgNi0yLjY5IDYtNkwyNCAxNGMtMy4zMSAwLTYtMi42OS02LTYgMC0zLjMxIDIuNjktNiA2LTZ6Ii8+PC9zdmc+",
       "items": {
         "syncUrl": {
           "type": "text",
           "label": "Webhook URL",
           "sm": 12,
-          "help": "Komplette URL inkl. API Key Parameter, z.B. https://.../sync?api-key=123",
+          "help": "Complete URL including API key parameter, e.g. https://.../sync?api-key=123",
           "xs": 12,
           "md": 12,
           "lg": 12,
@@ -376,7 +376,7 @@
         },
         "syncIntervalMin": {
           "type": "number",
-          "label": "Intervall (Min)",
+          "label": "Interval (min)",
           "default": 60,
           "sm": 6,
           "xs": 12,
@@ -386,10 +386,10 @@
         },
         "remoteSyncSkipStale": {
           "type": "checkbox",
-          "label": "Inaktive Quellen weglassen",
+          "label": "Skip inactive sources",
           "default": false,
           "sm": 6,
-          "help": "Werte, die laut Aktualitätsgrenze/Qualität als inaktiv gelten, werden nicht an den Webhook gesendet.",
+          "help": "Values that are considered inactive according to the staleness limit/quality are not sent to the webhook.",
           "xs": 12,
           "md": 6,
           "lg": 6,
@@ -397,9 +397,9 @@
         },
         "syncCaCert": {
           "type": "text",
-          "label": "Vertrauenswürdiges Zertifikat / CA (PEM, optional)",
+          "label": "Trusted certificate / CA (PEM, optional)",
           "sm": 12,
-          "help": "Nur bei selbstsigniertem/internem Zertifikat der Sync-Gegenstelle nötig. Leer lassen bei öffentlichem Zertifikat (Standard-Systemvertrauensstore wird genutzt).",
+          "help": "Only required for a self-signed/internal certificate of the sync target. Leave empty for a public certificate (the default system trust store is used).",
           "minRows": 6,
           "maxRows": 12,
           "xs": 12,
@@ -410,7 +410,7 @@
         "checkSync": {
           "type": "sendTo",
           "command": "checkSync",
-          "label": "Verbindung Prüfen",
+          "label": "Check connection",
           "sm": 4,
           "variant": "contained",
           "xs": 12,
@@ -421,7 +421,7 @@
         "lastSyncStatus": {
           "type": "state",
           "oid": "info.lastSyncStatus",
-          "label": "Letzter Status / Fehlercode",
+          "label": "Last status / error code",
           "readOnly": true,
           "sm": 8,
           "xs": 12,

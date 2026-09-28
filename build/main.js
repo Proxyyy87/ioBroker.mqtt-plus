@@ -117,7 +117,7 @@ class MqttPlus extends utils.Adapter {
         const raw = (entry.commandSuffix || "").trim() || "/set";
         const suffix = this.convertMqttPathToIobrokerId(raw);
         if (!suffix || suffix === "unknown") {
-            this.log.warn(`[Setup] Ungültiger Befehls-Suffix "${raw}" für "${entry.id}" - verwende "/set".`);
+            this.log.warn(`[Setup] Invalid command suffix "${raw}" for "${entry.id}" - using "/set".`);
             return `${statePath}.set`;
         }
         return `${statePath}.${suffix}`;
@@ -126,56 +126,89 @@ class MqttPlus extends utils.Adapter {
     getValidatedBasePath() {
         let base = (this.config.targetBasePath || "").trim();
         if (!base) {
-            this.log.warn("[Config] Kein MQTT Ziel-Pfad konfiguriert - verwende Standard 'mqtt.0.'");
+            this.log.warn("[Config] No MQTT target path configured - using default 'mqtt.0.'");
             base = "mqtt.0.";
         }
         return base.endsWith(".") ? base : base + ".";
     }
+    // Übernimmt die bis 1.6.2 verwendeten Konfigurationsnamen serverPort/bindHost einmalig in
+    // port/bind und entfernt die alten Schlüssel. Das Schreiben des Instanzobjekts lässt den
+    // js-controller die Instanz mit der neuen Konfiguration neu starten - deshalb gibt die
+    // Funktion true zurück, und onReady bricht diesen Start ab.
+    async migrateLegacyConfig() {
+        const legacy = this.config;
+        if (legacy.serverPort === undefined && legacy.bindHost === undefined)
+            return false;
+        const objId = `system.adapter.${this.namespace}`;
+        const obj = await this.getForeignObjectAsync(objId);
+        if (!obj || !obj.native)
+            return false;
+        const native = obj.native;
+        if (native.serverPort !== undefined)
+            native.port = native.serverPort;
+        if (native.bindHost !== undefined)
+            native.bind = native.bindHost;
+        delete native.serverPort;
+        delete native.bindHost;
+        this.log.info(`[Setup] Configuration migrated: serverPort/bindHost -> port=${native.port}, bind=${native.bind}. Instance restarts.`);
+        await this.setForeignObjectAsync(objId, obj);
+        // Normalerweise startet js-controller die Instanz wegen der geänderten Konfiguration
+        // selbst neu. Falls das ausbleibt, fordert der Adapter den Neustart selbst an - sonst
+        // bliebe er ohne Webserver und Sync stehen. Adapter-Timer werden beim Unload aufgeräumt,
+        // ein regulärer Neustart vorher macht diesen Timer also wirkungslos.
+        this.setTimeout(() => {
+            this.log.warn("[Setup] No restart after configuration migration - restarting instance.");
+            this.restart();
+        }, MqttPlus.MIGRATION_RESTART_FALLBACK_MS);
+        return true;
+    }
     async onReady() {
         var _a, _b;
+        if (await this.migrateLegacyConfig())
+            return;
         await this.initObjects();
         await this.loadAuthLockouts();
         await this.setStateAsync("info.version", ADAPTER_VERSION, true);
-        this.log.info(`[Setup] MQTT-Bridge-Manager v${ADAPTER_VERSION} startet...`);
+        this.log.info(`[Setup] MQTT bridge manager v${ADAPTER_VERSION} starting...`);
         const staleMin = (_a = this.parseMinutes(this.config.staleAfterMin)) !== null && _a !== void 0 ? _a : MqttPlus.DEFAULT_STALE_AFTER_MIN;
         this.log.info(staleMin > 0
-            ? `[Setup] Aktualitätsprüfung: Quellen ohne Update seit ${staleMin} Min werden bei Start/Cycle/Force-Sync nicht gespiegelt.`
-            : "[Setup] Aktualitätsprüfung (Alter) global deaktiviert - nur Qualität (q) wird geprüft.");
+            ? `[Setup] Staleness check: sources without update for ${staleMin} min are not mirrored on start/cycle/force sync.`
+            : "[Setup] Staleness check (age) disabled globally - only quality (q) is checked.");
         await this.setupBridge();
-        const port = this.config.serverPort || 8095;
+        const port = this.config.port || 8095;
         const hasTls = !!(this.config.dashboardTlsCert && this.config.dashboardTlsKey);
         if (!this.config.dashboardPassword) {
-            this.log.warn("[Dashboard] Kein Passwort gesetzt - der Webserver ist ohne Zugangsschutz erreichbar! Bitte in den Adapter-Einstellungen (Tab 'Web Dashboard') ein Passwort vergeben.");
+            this.log.warn("[Dashboard] No password set - the web server is reachable without access protection! Please set a password in the adapter settings (tab 'Web Dashboard').");
         }
         else if (!hasTls) {
-            this.log.warn("[Dashboard] Passwort ist gesetzt, aber kein TLS-Zertifikat konfiguriert - die Zugangsdaten werden unverschlüsselt (HTTP) übertragen. Für Verschlüsselung im Tab 'Web Dashboard' Zertifikat/Key hinterlegen.");
+            this.log.warn("[Dashboard] A password is set, but no TLS certificate is configured - credentials are transmitted unencrypted (HTTP). Add certificate/key in the tab 'Web Dashboard' for encryption.");
         }
         this.startWebServer(port);
         await this.updateDashboardUrlState(port);
         // 1. Normales Fallback-Intervall (Mit Cache), mindestens 5s gegen Busy-Loop bei Fehlkonfiguration
         const updateIntervalSec = Math.max(5, this.config.updateIntervalSec || 60);
-        this.log.info(`Starte Update-Intervall (Fallback): ${updateIntervalSec} Sekunden`);
+        this.log.info(`Starting update interval (fallback): ${updateIntervalSec} seconds`);
         this.updateInterval = this.setInterval(() => {
-            this.runCycleSync().catch(e => this.log.error(`Cycle-Sync Fehler: ${e.message}`));
+            this.runCycleSync().catch(e => this.log.error(`Cycle sync error: ${e.message}`));
         }, updateIntervalSec * 1000);
         // 2. Force-Sync Intervall (ohne Cache zur System-Heilung), konfigurierbar/abschaltbar
         const forceSyncMin = (_b = this.config.forceSyncIntervalMin) !== null && _b !== void 0 ? _b : 5;
         if (forceSyncMin > 0) {
-            this.log.info(`Starte Force-Sync-Intervall: Alle ${forceSyncMin} Minuten (Heilung von Asynchronität)`);
+            this.log.info(`Starting force sync interval: every ${forceSyncMin} minutes (heals out-of-sync states)`);
             this.forceSyncInterval = this.setInterval(() => {
-                this.runForceSync().catch(e => this.log.error(`Force-Sync Fehler: ${e.message}`));
+                this.runForceSync().catch(e => this.log.error(`Force sync error: ${e.message}`));
             }, forceSyncMin * 60 * 1000);
         }
         else {
-            this.log.info("Force-Sync-Intervall deaktiviert (Konfiguration).");
+            this.log.info("Force sync interval disabled (configuration).");
         }
         // 3. Remote Sync
         if (this.config.syncUrl) {
             const syncIntervalMin = this.config.syncIntervalMin || 60;
-            this.log.info(`Starte Remote-Sync: alle ${syncIntervalMin} Minuten`);
-            this.runRemoteSync(false).catch(e => this.log.error(`Remote-Sync Fehler: ${e.message}`));
+            this.log.info(`Starting remote sync: every ${syncIntervalMin} minutes`);
+            this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
             this.syncInterval = this.setInterval(() => {
-                this.runRemoteSync(false).catch(e => this.log.error(`Remote-Sync Fehler: ${e.message}`));
+                this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
             }, syncIntervalMin * 60 * 1000);
         }
         this.updateWatchdog("Running", true);
@@ -201,11 +234,11 @@ class MqttPlus extends utils.Adapter {
             }
         }
         catch (e) {
-            this.log.debug(`[Setup] Netzwerk-Interfaces konnten nicht ermittelt werden: ${e.message}`);
+            this.log.debug(`[Setup] Could not determine network interfaces: ${e.message}`);
         }
         const url = `http://${ip}:${port}`;
         await this.setStateAsync("info.dashboardUrl", url, true);
-        this.log.info(`Dashboard erreichbar unter: ${url}`);
+        this.log.info(`Dashboard reachable at: ${url}`);
     }
     async onMessage(obj) {
         if (!obj || typeof obj !== "object")
@@ -222,7 +255,7 @@ class MqttPlus extends utils.Adapter {
             }
         }
         else if (obj.command === "checkSync") {
-            this.log.info("Manueller Sync-Test angefordert...");
+            this.log.info("Manual sync test requested...");
             try {
                 const result = await this.runRemoteSync(true);
                 if (obj.callback) {
@@ -264,7 +297,7 @@ class MqttPlus extends utils.Adapter {
             }
         }
         catch (e) {
-            this.log.debug(`[Dashboard] Sperrliste konnte nicht geladen werden: ${e.message}`);
+            this.log.debug(`[Dashboard] Could not load lockout list: ${e.message}`);
         }
     }
     // Persistiert nur bei tatsächlicher Sperrung (nicht bei jedem Fehlversuch), um die
@@ -279,7 +312,7 @@ class MqttPlus extends utils.Adapter {
         this.setState("info.authLockouts", JSON.stringify(active), true);
     }
     async setupBridge() {
-        this.log.info("[MQTT-Bridge] Starte Setup & Indexierung...");
+        this.log.info("[MQTT bridge] Starting setup & indexing...");
         this.sourceToMappings.clear();
         this.targetToMappings.clear();
         this.targetTypeCache.clear();
@@ -310,14 +343,14 @@ class MqttPlus extends utils.Adapter {
                 }
             }
             catch (e) {
-                this.log.debug(`[Setup] Quellobjekt ${entry.id} nicht lesbar: ${e.message}`);
+                this.log.debug(`[Setup] Source object ${entry.id} not readable: ${e.message}`);
                 this.sourceTypeCache.set(entry.id, "unknown");
             }
             // Source Index (IOB -> MQTT)
             if (entry.dir === "out" || entry.dir === "both") {
                 const prevOwner = seenTargetPaths.get(fullTargetPath);
                 if (prevOwner && prevOwner !== entry.id) {
-                    this.log.warn(`[Setup] Doppeltes Ziel-Topic "${fullTargetPath}": wird sowohl von "${prevOwner}" als auch von "${entry.id}" beschrieben - die Werte überschreiben sich gegenseitig!`);
+                    this.log.warn(`[Setup] Duplicate target topic "${fullTargetPath}": written by both "${prevOwner}" and "${entry.id}" - the values overwrite each other!`);
                 }
                 else {
                     seenTargetPaths.set(fullTargetPath, entry.id);
@@ -389,7 +422,7 @@ class MqttPlus extends utils.Adapter {
                 }
             }
         }
-        this.log.info(`[Setup] Indiziert: ${this.sourceToMappings.size} Quellen, ${this.targetToMappings.size} Ziele.`);
+        this.log.info(`[Setup] Indexed: ${this.sourceToMappings.size} sources, ${this.targetToMappings.size} targets.`);
     }
     async onStateChange(id, state) {
         if (!state)
@@ -469,16 +502,16 @@ class MqttPlus extends utils.Adapter {
                 if (staleReason) {
                     if (!this.staleSources.has(sourceId)) {
                         this.staleSources.add(sourceId);
-                        this.log.info(`[Aktualität] Quelle ${sourceId} gilt als inaktiv (${staleReason}) - wird bis zum nächsten echten Update nicht mehr nach ${targetId} gespiegelt.`);
+                        this.log.info(`[Staleness] Source ${sourceId} is considered inactive (${staleReason}) - not mirrored to ${targetId} until its next real update.`);
                     }
                     else {
-                        this.log.debug(`[Aktualität] (${triggerSource}) Überspringe ${sourceId} -> ${targetId}: ${staleReason}`);
+                        this.log.debug(`[Staleness] (${triggerSource}) Skipping ${sourceId} -> ${targetId}: ${staleReason}`);
                     }
                     return false;
                 }
             }
             if (this.staleSources.delete(sourceId)) {
-                this.log.info(`[Aktualität] Quelle ${sourceId} ist wieder aktiv.`);
+                this.log.info(`[Staleness] Source ${sourceId} is active again.`);
             }
             // --- 1. ECHO-SCHUTZ (verbrauchbar, mit kurzer Verfallszeit) ---
             // Ein evtl. vorhandener Merker wird immer konsumiert (aufgeräumt), damit er nicht
@@ -489,7 +522,7 @@ class MqttPlus extends utils.Adapter {
                 this.pendingWrites.delete(sourceId);
                 const stillFresh = Date.now() - pending.ts < MqttPlus.PENDING_WRITE_TTL_MS;
                 if (opts.useEchoGuard && stillFresh && this.sameValue(pending.value, val)) {
-                    this.log.debug(`[Echo-Schild] (${triggerSource}) Ignoriere Echo von ${sourceId} -> ${targetId} (Wert '${val}' identisch zum eigenen Schreibvorgang)`);
+                    this.log.debug(`[Echo guard] (${triggerSource}) Ignoring echo ${sourceId} -> ${targetId} (value '${val}' equals own write)`);
                     return false;
                 }
             }
@@ -509,7 +542,7 @@ class MqttPlus extends utils.Adapter {
             // der Cache bleibt true), erneutes Einschalten per Dashboard wurde als "redundant"
             // verworfen. Erst aus und wieder ein half.
             if (!force && !opts.isCommand && this.sameValue(this.lastSyncValues.get(cacheKey), processedValue) && !isRefresh(this.lastSyncTs.get(cacheKey))) {
-                this.log.debug(`[Cache-Schild] Blockiere redundanten Wert für ${targetId} (Wert '${processedValue}' ist identisch zum letzten Sendevorgang)`);
+                this.log.debug(`[Cache guard] Blocking redundant value for ${targetId} (value '${processedValue}' equals the last sent value)`);
                 return false;
             }
             // --- 2b. ZIELVERGLEICH (Start/Force-Sync) ---
@@ -519,7 +552,7 @@ class MqttPlus extends utils.Adapter {
             if (opts.targetState && this.sameValue(opts.targetState.val, processedValue) && !isRefresh(opts.targetState.ts)) {
                 this.lastSyncValues.set(cacheKey, processedValue);
                 this.lastSyncTs.set(cacheKey, srcTs);
-                this.log.debug(`[Ziel-Schild] (${triggerSource}) ${targetId} hat bereits den Wert '${processedValue}' - kein Schreiben nötig`);
+                this.log.debug(`[Target guard] (${triggerSource}) ${targetId} already has the value '${processedValue}' - no write needed`);
                 return false;
             }
             this.lastSyncValues.set(cacheKey, processedValue);
@@ -549,7 +582,7 @@ class MqttPlus extends utils.Adapter {
             return true;
         }
         catch (e) {
-            this.log.error(`Sync-Fehler ${sourceId}: ${e.message}`);
+            this.log.error(`Sync error ${sourceId}: ${e.message}`);
             return false;
         }
     }
@@ -601,23 +634,23 @@ class MqttPlus extends utils.Adapter {
     // - ts älter als die Grenze: das Gerät hat sich seitdem nicht mehr gemeldet.
     getStaleReason(state, staleLimitMs) {
         if (typeof state.q === "number" && state.q !== 0) {
-            return `Qualität q=0x${state.q.toString(16).padStart(2, "0")}`;
+            return `quality q=0x${state.q.toString(16).padStart(2, "0")}`;
         }
         if (staleLimitMs > 0 && typeof state.ts === "number") {
             const age = Date.now() - state.ts;
             if (age > staleLimitMs)
-                return `letzte Aktualisierung vor ${this.formatAge(age)}`;
+                return `last update ${this.formatAge(age)} ago`;
         }
         return null;
     }
     formatAge(ms) {
         const min = Math.round(ms / 60000);
         if (min < 120)
-            return `${min} Min`;
+            return `${min} min`;
         const h = Math.round(min / 60);
         if (h < 48)
-            return `${h} Std`;
-        return `${Math.round(h / 24)} Tagen`;
+            return `${h} h`;
+        return `${Math.round(h / 24)} days`;
     }
     // Liest die aktuellen Werte der Zielobjekte gebündelt (für den Zielvergleich bei Start/Force).
     async getTargetStates(ids) {
@@ -628,7 +661,7 @@ class MqttPlus extends utils.Adapter {
             return await this.getForeignStatesAsync(unique);
         }
         catch (e) {
-            this.log.debug(`[Sync] Zielwerte nicht lesbar, schreibe ohne Vergleich: ${e.message}`);
+            this.log.debug(`[Sync] Target values not readable, writing without comparison: ${e.message}`);
             return {};
         }
     }
@@ -715,7 +748,7 @@ class MqttPlus extends utils.Adapter {
     async ensureAdapterObject(sourceId, targetPath, mappingUnit) {
         const parts = targetPath.split(".");
         if (parts.length < 2) {
-            this.log.warn(`[Setup] Ungültiger Zielpfad "${targetPath}" (Basispfad zu kurz) - übersprungen.`);
+            this.log.warn(`[Setup] Invalid target path "${targetPath}" (base path too short) - skipped.`);
             return;
         }
         let currentPath = parts[0] + "." + parts[1];
@@ -733,7 +766,7 @@ class MqttPlus extends utils.Adapter {
                 }
             }
             catch (e) {
-                this.log.debug(`[Setup] Ordner-Anlage ${currentPath} übersprungen: ${e.message}`);
+                this.log.debug(`[Setup] Folder creation ${currentPath} skipped: ${e.message}`);
             }
         }
         try {
@@ -757,7 +790,7 @@ class MqttPlus extends utils.Adapter {
                     _id: targetPath,
                     type: "state",
                     common: {
-                        name: `Export von ${sourceId}`,
+                        name: `Export of ${sourceId}`,
                         type: type,
                         role: role,
                         unit: unit,
@@ -774,7 +807,7 @@ class MqttPlus extends utils.Adapter {
             }
         }
         catch (e) {
-            this.log.debug(`[Setup] Zielobjekt ${targetPath} übersprungen: ${e.message}`);
+            this.log.debug(`[Setup] Target object ${targetPath} skipped: ${e.message}`);
         }
     }
     /**
@@ -803,7 +836,7 @@ class MqttPlus extends utils.Adapter {
             this.updateWatchdog("Cycle OK", true);
         }
         catch (e) {
-            this.log.error(`Cycle-Sync-Fehler: ${e.message}`);
+            this.log.error(`Cycle sync error: ${e.message}`);
         }
         finally {
             this.syncRunning = false;
@@ -820,7 +853,7 @@ class MqttPlus extends utils.Adapter {
             return;
         this.syncRunning = true;
         try {
-            this.log.info("[Force-Sync] Starte zyklische Zwangssynchronisation (Heilung von Asynchronität)...");
+            this.log.info("[Force sync] Starting periodic forced synchronisation (heals out-of-sync states)...");
             let healed = 0;
             let forced = 0;
             // 1. IOB -> MQTT (für 'out' und 'both' - IOB ist die Quelle der Wahrheit für Aktoren)
@@ -880,12 +913,12 @@ class MqttPlus extends utils.Adapter {
                 if (this.unloaded)
                     return;
             }
-            const forcedInfo = forced ? `, ${forced} im Modus "Force" neu geschrieben` : "";
-            this.log.info(`[Force-Sync] Abgeschlossen: ${healed} abweichende Werte geheilt${forcedInfo}.`);
+            const forcedInfo = forced ? `, ${forced} rewritten in mode "Force"` : "";
+            this.log.info(`[Force sync] Finished: ${healed} deviating values healed${forcedInfo}.`);
             this.updateWatchdog("Force-Sync OK", true);
         }
         catch (e) {
-            this.log.error(`Force-Sync-Fehler: ${e.message}`);
+            this.log.error(`Force sync error: ${e.message}`);
         }
         finally {
             this.syncRunning = false;
@@ -906,7 +939,7 @@ class MqttPlus extends utils.Adapter {
                 const isLast = i === pathParts.length - 1;
                 if (isLast) {
                     if (current[part] && typeof current[part] === "object" && !current[part].full_topic) {
-                        this.log.warn(`[JSON-Tree] Topic-Präfix-Kollision: "${cleanSuffix}" überschreibt eine bestehende Unterstruktur.`);
+                        this.log.warn(`[JSON tree] Topic prefix collision: "${cleanSuffix}" overwrites an existing substructure.`);
                     }
                     const statePath = `${basePath}${cleanSuffix}`;
                     const commandPath = this.resolveCommandPath(entry, statePath);
@@ -923,7 +956,7 @@ class MqttPlus extends utils.Adapter {
                 }
                 else {
                     if (current[part] && current[part].full_topic) {
-                        this.log.warn(`[JSON-Tree] Topic-Präfix-Kollision: "${cleanSuffix}" kollidiert mit dem bestehenden Topic "${current[part].full_topic}".`);
+                        this.log.warn(`[JSON tree] Topic prefix collision: "${cleanSuffix}" collides with the existing topic "${current[part].full_topic}".`);
                         current[part] = {};
                     }
                     else if (!current[part]) {
@@ -1000,7 +1033,7 @@ class MqttPlus extends utils.Adapter {
     }
     async runRemoteSync(verbose = false) {
         if (!this.config.syncUrl) {
-            const msg = "Keine Sync-URL konfiguriert";
+            const msg = "No sync URL configured";
             await this.setStateAsync("info.lastSyncStatus", msg, true);
             return { success: false, message: msg };
         }
@@ -1009,7 +1042,7 @@ class MqttPlus extends utils.Adapter {
             parsedUrl = new URL(this.config.syncUrl);
         }
         catch (_a) {
-            const msg = "Ungültige Sync-URL";
+            const msg = "Invalid sync URL";
             this.log.error(`Remote Sync Error: ${msg} (${this.config.syncUrl})`);
             await this.setStateAsync("info.lastSyncStatus", msg, true);
             return { success: false, message: msg };
@@ -1022,7 +1055,7 @@ class MqttPlus extends utils.Adapter {
                 templateStr = tplState.val;
         }
         catch (e) {
-            this.log.debug(`[Remote Sync] Template-State nicht lesbar, verwende Standard: ${e.message}`);
+            this.log.debug(`[Remote Sync] Template state not readable, using default: ${e.message}`);
         }
         // Platzhalter, die roh in einen JSON-String eingesetzt werden, müssen JSON-escaped werden -
         // sonst bricht ein Anführungszeichen/Backslash in einer ID das gesamte JSON.
@@ -1055,12 +1088,12 @@ class MqttPlus extends utils.Adapter {
                         payload.push(JSON.parse(itemStr));
                     }
                     catch (_b) {
-                        this.log.warn(`Remote-Sync Template Fehler bei ${entry.id}`);
+                        this.log.warn(`Remote sync template error for ${entry.id}`);
                     }
                 }
             }
             catch (e) {
-                this.log.debug(`[Remote Sync] Zustand für ${entry.id} nicht lesbar: ${e.message}`);
+                this.log.debug(`[Remote Sync] State of ${entry.id} not readable: ${e.message}`);
             }
         }
         this.log.debug(`[Remote Sync] Payload to send: ${JSON.stringify(payload)}`);
@@ -1076,7 +1109,7 @@ class MqttPlus extends utils.Adapter {
                 // Intervall-Läufen nicht zuzumüllen - beweist, dass die konfigurierte CA den
                 // Adapter-Prozess tatsächlich erreicht hat (Diagnose für Config-Save/Restart-Probleme).
                 if (verbose) {
-                    let fingerprintInfo = "Fingerabdruck nicht ermittelbar";
+                    let fingerprintInfo = "fingerprint not determinable";
                     try {
                         const cert = new crypto.X509Certificate(normalizedCaCert);
                         fingerprintInfo = `Subject="${cert.subject.replace(/\n/g, ", ")}" Fingerprint(SHA256)=${cert.fingerprint256}`;
@@ -1084,20 +1117,20 @@ class MqttPlus extends utils.Adapter {
                     catch (certErr) {
                         const trimmed = normalizedCaCert.trim();
                         const headCodes = [...trimmed.slice(0, 12)].map(c => c.charCodeAt(0)).join(",");
-                        fingerprintInfo = `Zertifikat konnte auch nach Normalisierung nicht geparst werden: ${certErr.message} | erste 12 Zeichencodes: ${headCodes} (erwartet für "-----BEGIN": 45,45,45,45,45,66,69,71,73,78,32,67)`;
+                        fingerprintInfo = `Certificate could not be parsed even after normalisation: ${certErr.message} | first 12 char codes: ${headCodes} (expected for "-----BEGIN": 45,45,45,45,45,66,69,71,73,78,32,67)`;
                     }
-                    this.log.info(`[Remote Sync] Benutzerdefinierte CA geladen (${normalizedCaCert.trim().length} Zeichen). ${fingerprintInfo}`);
+                    this.log.info(`[Remote Sync] Custom CA loaded (${normalizedCaCert.trim().length} characters). ${fingerprintInfo}`);
                 }
             }
             catch (e) {
-                const msg = `Ungültiges CA-Zertifikat in den Einstellungen: ${e.message}`;
+                const msg = `Invalid CA certificate in the settings: ${e.message}`;
                 this.log.error(`Remote Sync Error: ${msg}`);
                 await this.setStateAsync("info.lastSyncStatus", msg, true);
                 return { success: false, message: msg };
             }
         }
         else if (verbose) {
-            this.log.info("[Remote Sync] Kein CA-Zertifikat konfiguriert - Standard-Systemvertrauensstore wird verwendet.");
+            this.log.info("[Remote Sync] No CA certificate configured - using the default system trust store.");
         }
         let sentCount = 0;
         try {
@@ -1108,8 +1141,8 @@ class MqttPlus extends utils.Adapter {
                 await this.postWithRetry(encodedUrl, chunk, httpsAgent);
                 sentCount += chunk.length;
             }
-            const staleInfo = skippedStale ? `, ${skippedStale} inaktive übersprungen` : "";
-            const msg = `OK: ${payload.length} Werte gesendet${staleInfo} (${new Date().toLocaleTimeString()})`;
+            const staleInfo = skippedStale ? `, ${skippedStale} inactive skipped` : "";
+            const msg = `OK: ${payload.length} values sent${staleInfo} (${new Date().toLocaleTimeString()})`;
             await this.setStateAsync("info.lastSyncStatus", msg, true);
             this.log.debug(`Remote Sync (${payload.length}) OK.`);
             return { success: true, message: msg };
@@ -1125,8 +1158,8 @@ class MqttPlus extends utils.Adapter {
             // Bei Chunking zeigt der Teilerfolg, ob nur ein Bruchteil oder praktisch nichts
             // angekommen ist - relevant, weil ein einzelner gescheiterter Chunk sonst wie ein
             // Totalausfall aussieht, obwohl der Großteil der Werte bereits übertragen wurde.
-            const progress = payload.length > MqttPlus.REMOTE_SYNC_CHUNK_SIZE ? ` (${sentCount}/${payload.length} Werte übertragen)` : "";
-            const fullMsg = `Fehler${progress}: ${errorMsg} (${new Date().toLocaleTimeString()})`;
+            const progress = payload.length > MqttPlus.REMOTE_SYNC_CHUNK_SIZE ? ` (${sentCount}/${payload.length} values transmitted)` : "";
+            const fullMsg = `Error${progress}: ${errorMsg} (${new Date().toLocaleTimeString()})`;
             this.log.error(`Remote Sync Error: ${fullMsg} | URL: ${encodedUrl}`);
             await this.setStateAsync("info.lastSyncStatus", fullMsg, true);
             return { success: false, message: fullMsg };
@@ -1179,7 +1212,7 @@ class MqttPlus extends utils.Adapter {
         const attempts = ((entry === null || entry === void 0 ? void 0 : entry.count) || 0) + 1;
         if (attempts >= MqttPlus.MAX_AUTH_ATTEMPTS) {
             this.failedAuthAttempts.set(ip, { count: 0, lockedUntil: Date.now() + MqttPlus.AUTH_LOCKOUT_MS });
-            this.log.warn(`[Dashboard] Zu viele fehlgeschlagene Login-Versuche von ${ip} - für 5 Minuten gesperrt.`);
+            this.log.warn(`[Dashboard] Too many failed login attempts from ${ip} - locked for 5 minutes.`);
             this.persistAuthLockouts();
         }
         else {
@@ -1221,7 +1254,7 @@ class MqttPlus extends utils.Adapter {
             req.setTimeout(30000, () => {
                 if (!settled) {
                     res.writeHead(408, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ success: false, error: "Zeitüberschreitung beim Empfang" }));
+                    res.end(JSON.stringify({ success: false, error: "Timeout while receiving" }));
                     req.destroy();
                     finish(null);
                 }
@@ -1232,7 +1265,7 @@ class MqttPlus extends utils.Adapter {
                 size += chunk.length;
                 if (size > maxBytes) {
                     res.writeHead(413, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ success: false, error: "Anfrage zu groß" }));
+                    res.end(JSON.stringify({ success: false, error: "Request too large" }));
                     req.destroy();
                     finish(null);
                     return;
@@ -1268,7 +1301,7 @@ class MqttPlus extends utils.Adapter {
                     // überschreiben.
                     if (req.method === "POST" && !sameOrigin) {
                         res.writeHead(403, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ success: false, error: "Cross-Origin-Request abgelehnt" }));
+                        res.end(JSON.stringify({ success: false, error: "Cross-origin request rejected" }));
                         return;
                     }
                     // Pfad statt rohem req.url vergleichen - sonst bricht jeder Query-String (?t=123)
@@ -1306,12 +1339,12 @@ class MqttPlus extends utils.Adapter {
                             const data = JSON.parse(body);
                             if (data.template) {
                                 await this.setStateAsync("config.syncTemplate", data.template, true);
-                                this.log.info("Neues Remote-Sync Template gespeichert.");
+                                this.log.info("New remote sync template saved.");
                                 res.writeHead(200, { "Content-Type": "application/json" });
                                 res.end(JSON.stringify({ success: true }));
                             }
                             else {
-                                throw new Error("Kein Template empfangen");
+                                throw new Error("No template received");
                             }
                         }
                         catch (e) {
@@ -1326,28 +1359,28 @@ class MqttPlus extends utils.Adapter {
                         try {
                             const uploaded = JSON.parse(body);
                             if (uploaded && Array.isArray(uploaded.mappings)) {
-                                this.log.info(`Restore gestartet! ${uploaded.mappings.length} Mappings gefunden.`);
+                                this.log.info(`Restore started: ${uploaded.mappings.length} mappings found.`);
                                 const adapterObj = await this.getForeignObjectAsync(`system.adapter.${this.namespace}`);
                                 if (adapterObj) {
                                     adapterObj.native.mappings = uploaded.mappings;
                                     if (uploaded.prefix) {
                                         adapterObj.native.targetBasePath = uploaded.prefix;
-                                        this.log.info(`Prefix auf ${uploaded.prefix} gesetzt.`);
+                                        this.log.info(`Prefix set to ${uploaded.prefix}.`);
                                     }
                                     await this.setForeignObjectAsync(`system.adapter.${this.namespace}`, adapterObj);
                                     res.writeHead(200, { "Content-Type": "application/json" });
-                                    res.end(JSON.stringify({ success: true, message: "Konfiguration wiederhergestellt. Adapter startet neu..." }));
+                                    res.end(JSON.stringify({ success: true, message: "Configuration restored. Adapter restarts..." }));
                                 }
                                 else {
-                                    throw new Error("Adapter-Objekt nicht gefunden!");
+                                    throw new Error("Adapter object not found!");
                                 }
                             }
                             else {
-                                throw new Error("Ungültiges Dateiformat. 'mappings' Array fehlt.");
+                                throw new Error("Invalid file format: 'mappings' array missing.");
                             }
                         }
                         catch (e) {
-                            this.log.error(`Restore Fehler: ${e.message}`);
+                            this.log.error(`Restore error: ${e.message}`);
                             res.writeHead(500, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ success: false, error: e.message }));
                         }
@@ -1360,10 +1393,10 @@ class MqttPlus extends utils.Adapter {
                 catch (e) {
                     // Ohne dieses catch würde ein Fehler in generateJsonTree() o.ä. nie eine
                     // Antwort senden - der Client hinge bis zum eigenen Timeout.
-                    this.log.error(`[Dashboard] Unerwarteter Fehler: ${e.message}`);
+                    this.log.error(`[Dashboard] Unexpected error: ${e.message}`);
                     if (!res.headersSent) {
                         res.writeHead(500, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ success: false, error: "Interner Fehler" }));
+                        res.end(JSON.stringify({ success: false, error: "Internal error" }));
                     }
                 }
             };
@@ -1379,7 +1412,7 @@ class MqttPlus extends utils.Adapter {
                     usesTls = true;
                 }
                 catch (e) {
-                    this.log.error(`[Dashboard] TLS-Zertifikat/Key ungültig, falle auf HTTP zurück: ${e.message}`);
+                    this.log.error(`[Dashboard] TLS certificate/key invalid, falling back to HTTP: ${e.message}`);
                 }
             }
             if (!this.httpServer) {
@@ -1389,7 +1422,7 @@ class MqttPlus extends utils.Adapter {
                 this.activeSockets.add(socket);
                 socket.on("close", () => this.activeSockets.delete(socket));
             });
-            const bindHost = this.config.bindHost || "0.0.0.0";
+            const bindHost = this.config.bind || "0.0.0.0";
             // Bei einem Update/Neustart hält der alte Prozess den Port oft noch einige Sekunden.
             // Deshalb erst mehrfach neu versuchen, statt sofort (und dauerhaft) aufzugeben.
             let listenAttempts = 0;
@@ -1398,19 +1431,19 @@ class MqttPlus extends utils.Adapter {
                 this.httpServer.listen(port, bindHost);
             };
             this.httpServer.on("listening", () => {
-                this.log.info(`Dashboard Webserver läuft auf ${usesTls ? "https" : "http"}://${bindHost}:${port}`);
+                this.log.info(`Dashboard web server running on ${usesTls ? "https" : "http"}://${bindHost}:${port}`);
                 this.setState("info.connection", true, true);
             });
             this.httpServer.on("error", (e) => {
                 if (e.code === "EADDRINUSE" && listenAttempts < MqttPlus.LISTEN_ATTEMPTS && !this.unloaded) {
-                    this.log.warn(`Port ${port} ist noch belegt - neuer Versuch ${listenAttempts + 1}/${MqttPlus.LISTEN_ATTEMPTS} in ${MqttPlus.LISTEN_RETRY_MS / 1000} s.`);
+                    this.log.warn(`Port ${port} is still in use - retry ${listenAttempts + 1}/${MqttPlus.LISTEN_ATTEMPTS} in ${MqttPlus.LISTEN_RETRY_MS / 1000} s.`);
                     this.setTimeout(tryListen, MqttPlus.LISTEN_RETRY_MS);
                     return;
                 }
-                this.log.error(`Webserver Fehler: ${e.message}`);
+                this.log.error(`Web server error: ${e.message}`);
                 this.setState("info.connection", false, true);
                 if (e.code === "EADDRINUSE") {
-                    this.log.error(`Port ${port} ist dauerhaft belegt - Adapter wird beendet, damit er nicht "grün" ohne Dashboard weiterläuft.`);
+                    this.log.error(`Port ${port} is permanently in use - stopping the adapter so it does not keep running "green" without dashboard.`);
                     // terminate() statt eines harten Prozess-Endes: beendet im Compact Mode nur
                     // diese Instanz, nicht den gesamten Host-Prozess.
                     this.terminate("EADDRINUSE", utils.EXIT_CODES.ADAPTER_REQUESTED_TERMINATION);
@@ -1419,14 +1452,14 @@ class MqttPlus extends utils.Adapter {
             tryListen();
         }
         catch (e) {
-            this.log.error(`Konnte Webserver nicht starten: ${e.message}`);
+            this.log.error(`Could not start web server: ${e.message}`);
             this.setState("info.connection", false, true);
         }
     }
     getDashboardHtml() {
         return `
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1454,7 +1487,7 @@ class MqttPlus extends utils.Adapter {
         <h1>MQTT Plus Dashboard</h1>
 
         <div class="status-bar">
-            <div class="status-item">Watchdog: <span id="wd" class="status-value">Lade...</span></div>
+            <div class="status-item">Watchdog: <span id="wd" class="status-value">Loading...</span></div>
             <div class="status-item">Mappings: <span id="map" class="status-value">0</span></div>
             <div class="status-item">Uptime: <span id="up" class="status-value">0s</span></div>
         </div>
@@ -1464,22 +1497,22 @@ class MqttPlus extends utils.Adapter {
             <button onclick="downloadJson()">Download Backup (.json)</button>
             <span style="margin: 0 15px;">|</span>
             <input type="file" id="restoreFile" accept=".json" />
-            <button class="secondary" onclick="uploadBackup()">Backup Wiederherstellen</button>
+            <button class="secondary" onclick="uploadBackup()">Restore backup</button>
         </div>
 
-        <h2>JSON Struktur Vorschau</h2>
+        <h2>JSON structure preview</h2>
         <div style="margin-bottom: 10px;">
-            <button class="secondary" onclick="loadJson()">Vorschau Aktualisieren</button>
+            <button class="secondary" onclick="loadJson()">Refresh preview</button>
         </div>
-        <pre id="jsonViewer">Lade Daten...</pre>
+        <pre id="jsonViewer">Loading data...</pre>
 
-        <h2>Remote Sync Konfiguration</h2>
-        <p>Hier können Sie definieren, wie das JSON für den Remote-Sync (POST Request) aussieht.</p>
-        <div class="help">Platzhalter: %ID%, %MQTT%, %VAL%, %TS% (letzte Aktualisierung), %LC% (letzte Änderung), %ACK%, %Q% (Qualität), %UNIT%, %PREFIX%, %DIR%</div>
+        <h2>Remote sync configuration</h2>
+        <p>Define what the JSON for the remote sync (POST request) looks like.</p>
+        <div class="help">Placeholders: %ID%, %MQTT%, %VAL%, %TS% (last update), %LC% (last change), %ACK%, %Q% (quality), %UNIT%, %PREFIX%, %DIR%</div>
         <textarea id="templateEditor"></textarea>
         <div style="margin-top: 10px;">
-            <button onclick="saveTemplate()">Template Speichern</button>
-            <button class="secondary" onclick="resetTemplate()">Standard wiederherstellen</button>
+            <button onclick="saveTemplate()">Save template</button>
+            <button class="secondary" onclick="resetTemplate()">Restore default</button>
         </div>
     </div>
 
@@ -1501,13 +1534,13 @@ class MqttPlus extends utils.Adapter {
 
         async function loadJson() {
             try {
-                document.getElementById('jsonViewer').innerText = "Lade...";
+                document.getElementById('jsonViewer').innerText = "Loading...";
                 const res = await fetch('/api/json');
                 const data = await res.json();
                 document.getElementById('jsonViewer').innerText = JSON.stringify(data.structure, null, 4);
                 window.lastJson = data;
             } catch(e) {
-                document.getElementById('jsonViewer').innerText = "Fehler beim Laden: " + e;
+                document.getElementById('jsonViewer').innerText = "Error while loading: " + e;
             }
         }
 
@@ -1534,7 +1567,7 @@ class MqttPlus extends utils.Adapter {
 
         async function uploadBackup() {
             const fileInput = document.getElementById('restoreFile');
-            if(fileInput.files.length === 0) return alert("Bitte erst eine Datei auswählen!");
+            if(fileInput.files.length === 0) return alert("Please select a file first!");
 
             const file = fileInput.files[0];
             const reader = new FileReader();
@@ -1543,9 +1576,9 @@ class MqttPlus extends utils.Adapter {
                 try {
                     const jsonContent = e.target.result;
                     const parsed = JSON.parse(jsonContent);
-                    if(!parsed.mappings) throw new Error("Keine Mappings in Datei gefunden!");
+                    if(!parsed.mappings) throw new Error("No mappings found in file!");
 
-                    if(!confirm("ACHTUNG: Dies überschreibt die aktuelle Konfiguration und startet den Adapter neu. Fortfahren?")) return;
+                    if(!confirm("WARNING: This overwrites the current configuration and restarts the adapter. Continue?")) return;
 
                     const res = await fetch('/api/upload-backup', {
                         method: 'POST',
@@ -1557,10 +1590,10 @@ class MqttPlus extends utils.Adapter {
                         alert(ret.message);
                         location.reload();
                     } else {
-                        alert("Fehler beim Restore: " + ret.error);
+                        alert("Restore error: " + ret.error);
                     }
                 } catch(err) {
-                    alert("Dateifehler: " + err);
+                    alert("File error: " + err);
                 }
             };
             reader.readAsText(file);
@@ -1575,9 +1608,9 @@ class MqttPlus extends utils.Adapter {
                     body: JSON.stringify({template: tpl})
                 });
                 const ret = await res.json();
-                if(ret.success) alert("Gespeichert!");
-                else alert("Fehler: " + ret.error);
-            } catch(e) { alert("Sende-Fehler: " + e); }
+                if(ret.success) alert("Saved!");
+                else alert("Error: " + ret.error);
+            } catch(e) { alert("Send error: " + e); }
         }
 
         function resetTemplate() {
@@ -1639,14 +1672,14 @@ class MqttPlus extends utils.Adapter {
                 }
             }
             catch (e) {
-                this.log.debug(`Unsubscribe-Fehler: ${e.message}`);
+                this.log.debug(`Unsubscribe error: ${e.message}`);
             }
             await this.setStateAsync("info.connection", false, true);
             this.log.info("cleaned everything up...");
             callback();
         }
         catch (e) {
-            this.log.error(`Fehler beim Herunterfahren: ${e.message}`);
+            this.log.error(`Error during shutdown: ${e.message}`);
             callback();
         }
     }
@@ -1662,6 +1695,8 @@ MqttPlus.PENDING_WRITE_TTL_MS = 10000;
 // Port-Konflikt beim Start: so oft neu versuchen, bevor der Adapter aufgibt.
 MqttPlus.LISTEN_ATTEMPTS = 6;
 MqttPlus.LISTEN_RETRY_MS = 5000;
+// Wartezeit auf den Neustart durch js-controller nach der Konfigurationsmigration.
+MqttPlus.MIGRATION_RESTART_FALLBACK_MS = 30000;
 // Standard-Aktualitätsgrenze, falls in der Instanz (z.B. nach Update von <1.6.0) nichts gesetzt ist.
 MqttPlus.DEFAULT_STALE_AFTER_MIN = 1440; // 24 h
 // Eigene Objekte der Instanz. Reihenfolge wichtig: die Channel "info" und "config" zuerst,
@@ -1674,12 +1709,12 @@ MqttPlus.OWN_OBJECTS = [
     { id: "watchdog", obj: { type: "state", common: { name: "MQTT Bridge Watchdog", type: "string", role: "text", read: true, write: false }, native: {} } },
     { id: "config.syncTemplate", obj: { type: "state", common: { name: "Remote Sync JSON Template", type: "string", role: "json", read: true, write: true }, native: {} } },
     { id: "info.dashboardUrl", obj: { type: "state", common: { name: "Dashboard URL", type: "string", role: "url", read: true, write: false }, native: {} } },
-    { id: "info.lastSyncStatus", obj: { type: "state", common: { name: "Letzter Sync Status", type: "string", role: "text", read: true, write: false }, native: {} } },
+    { id: "info.lastSyncStatus", obj: { type: "state", common: { name: "Last sync status", type: "string", role: "text", read: true, write: false }, native: {} } },
     { id: "info.status", obj: { type: "state", common: { name: "Status", type: "string", role: "text", read: true, write: false }, native: {} } },
-    { id: "info.lastCycle", obj: { type: "state", common: { name: "Letzter Sync-Zyklus", type: "number", role: "value.time", read: true, write: false }, native: {} } },
+    { id: "info.lastCycle", obj: { type: "state", common: { name: "Last sync cycle", type: "number", role: "value.time", read: true, write: false }, native: {} } },
     { id: "info.connection", obj: { type: "state", common: { name: "Connected", type: "boolean", role: "indicator.connected", read: true, write: false, def: false }, native: {} } },
-    { id: "info.version", obj: { type: "state", common: { name: "Adapter-Version", type: "string", role: "text", read: true, write: false }, native: {} } },
-    { id: "info.authLockouts", obj: { type: "state", common: { name: "Login-Sperrliste (intern)", type: "string", role: "json", read: true, write: false, def: "{}" }, native: {} } },
+    { id: "info.version", obj: { type: "state", common: { name: "Adapter version", type: "string", role: "text", read: true, write: false }, native: {} } },
+    { id: "info.authLockouts", obj: { type: "state", common: { name: "Login lockout list (internal)", type: "string", role: "json", read: true, write: false, def: "{}" }, native: {} } },
 ];
 if (require.main !== module) {
     module.exports = (options) => new MqttPlus(options);

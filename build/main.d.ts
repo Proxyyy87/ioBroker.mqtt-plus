@@ -22,14 +22,16 @@ declare global {
             mappings: MappingEntry[];
             syncUrl: string;
             syncIntervalMin: number;
-            serverPort: number;
+            port: number;
+            bind: string;
+            serverPort?: number;
+            bindHost?: string;
             dashboardUser: string;
             dashboardPassword: string;
             dashboardTlsCert: string;
             dashboardTlsKey: string;
             syncCaCert: string;
             forceSyncIntervalMin: number;
-            bindHost: string;
             staleAfterMin: number;
             remoteSyncSkipStale: boolean;
         }

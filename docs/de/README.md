@@ -1,9 +1,8 @@
 # ioBroker.mqtt-plus
 
-![Logo](mqtt-plus.png)
+![Logo](../../admin/mqtt-plus.png)
 
-**Tests:** ![Test Status](https://img.shields.io/badge/Tests-not%20implemented-yellow)
-**Lizenz:** ![License](https://img.shields.io/badge/License-MIT-blue)
+**Lizenz:** MIT · [English version](../en/README.md)
 
 ## Zusammenfassung
 
@@ -115,7 +114,8 @@ Die Konfiguration erfolgt über die ioBroker Admin-Oberfläche, verteilt auf dre
   über HTTPS statt HTTP, Zugangsdaten werden dann verschlüsselt übertragen. Ohne TLS werden
   Basic-Auth-Zugangsdaten im Klartext (Base64 ist keine Verschlüsselung) über das Netz
   übertragen — auf einem reinen LAN ein geringeres, aber reales Risiko.
-* **Dashboard URL:** Schreibgeschütztes Feld mit dem fertigen Link zum Dashboard.
+* **Dashboard-Link:** Der fertige Link zum Dashboard steht in der Instanzübersicht des Admins
+  (Symbol neben der Instanz) sowie im Datenpunkt `info.dashboardUrl`.
 
 ### Reiter 3: Remote Sync
 
@@ -138,20 +138,20 @@ Die Konfiguration erfolgt über die ioBroker Admin-Oberfläche, verteilt auf dre
 
 ### Das Web Dashboard (Backup & Restore)
 
-Erreichbar über die im Reiter „Web Dashboard“ angezeigte URL (Login erforderlich, falls ein
-Passwort gesetzt ist).
+Erreichbar über den Link in der Instanzübersicht bzw. `info.dashboardUrl` (Login erforderlich,
+falls ein Passwort gesetzt ist). Die Oberfläche des Dashboards ist englisch.
 
 **Funktionen:**
 1. **Status:** Watchdog, Mapping-Anzahl, Uptime.
 2. **Backup & Restore:**
-   * **Download Backup:** Lädt eine `.json`-Datei mit Baumstruktur und kompletter
+   * **Download Backup (.json):** Lädt eine `.json`-Datei mit Baumstruktur und kompletter
      Mapping-Konfiguration herunter.
-   * **Backup Wiederherstellen:** Lädt eine zuvor gesicherte Datei hoch, ersetzt die
+   * **Restore backup:** Lädt eine zuvor gesicherte Datei hoch, ersetzt die
      Mapping-Konfiguration und startet den Adapter neu. Der Upload muss von derselben Origin
      kommen wie das Dashboard selbst (CSRF-Schutz) — ein Upload aus einer fremden Webseite
      heraus wird abgelehnt.
-3. **JSON Struktur:** Live-Vorschau der generierten MQTT-Baumstruktur.
-4. **Remote Sync Konfiguration (Template):** Format des JSON-Objekts pro Datenpunkt, das an den
+3. **JSON structure preview:** Live-Vorschau der generierten MQTT-Baumstruktur.
+4. **Remote sync configuration (Template):** Format des JSON-Objekts pro Datenpunkt, das an den
    Remote-Server gesendet wird.
 
 ### Sicherheit
@@ -236,6 +236,10 @@ unabhängig vom `ack`-Flag: Viele MQTT-Adapter reichen `/set`-Nachrichten bewuss
 unbestätigten Steuerbefehl (`ack: false`) weiter, und ein Echo kann dort nicht entstehen, weil
 `mqtt-plus` auf das Befehls-Topic nie selbst schreibt. Im Modus `Single` bleibt die Prüfung auf
 `ack: true` dagegen zwingend — dort wäre ein `ack: false`-Ereignis der eigene Schreibvorgang.
+
+Ein Befehl wird außerdem nie vom Wert-Cache als „redundant“ verworfen: Der Cache kennt nur den
+letzten Befehl, nicht den Gerätezustand. Wurde das Gerät zwischendurch anderweitig geschaltet
+(Taster, App), muss auch die Wiederholung des vorherigen Befehls beim Gerät ankommen.
 
 Der Adapter legt bei `Dual` beide Objekte im Zielbaum an, das Basis-Topic zuerst und das
 Befehls-Topic darunter. In der JSON-Struktur-Vorschau und im Backup erscheinen beide Topics
@@ -356,4 +360,6 @@ Neben den Config-Reitern legt der Adapter folgende Status-Datenpunkte an:
 | `info.lastCycle` | Unix-Zeitstempel des letzten abgeschlossenen Sync-Zyklus |
 | `info.lastSyncStatus` | Ergebnis des letzten Remote-Sync-Laufs (Erfolg/Fehlertext) |
 | `info.dashboardUrl` | Fertiger Link zum Web-Dashboard |
+| `info.authLockouts` | Intern: aktive Login-Sperren des Dashboards (übersteht Neustarts) |
+| `config.syncTemplate` | Template für den Remote-Sync (im Dashboard bearbeitbar) |
 | `watchdog` | Freitext-Statuszeile (historisch, für Übersicht im Objektbaum) |

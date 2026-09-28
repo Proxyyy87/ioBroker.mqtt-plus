@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "mqtt-plus",
-    "version": "1.6.4",
+    "version": "1.6.5",
     "news": {
+      "1.6.5": {
+        "en": "Admin settings translated into all supported languages; log messages, dashboard and object names in English; documentation in English and German; configuration attributes renamed to the ioBroker convention (port, bind) with automatic migration",
+        "de": "Admin-Einstellungen in alle unterstützten Sprachen übersetzt; Log-Meldungen, Dashboard und Objektnamen auf Englisch; Dokumentation auf Englisch und Deutsch; Konfigurationsattribute nach ioBroker-Konvention umbenannt (port, bind) mit automatischer Übernahme",
+        "ru": "Настройки в админке переведены на все поддерживаемые языки; сообщения журнала, панель и имена объектов на английском; документация на английском и немецком; атрибуты конфигурации переименованы по соглашению ioBroker (port, bind) с автоматическим переносом",
+        "pt": "Configurações do admin traduzidas para todos os idiomas suportados; mensagens de registo, painel e nomes de objetos em inglês; documentação em inglês e alemão; atributos de configuração renomeados conforme a convenção do ioBroker (port, bind) com migração automática",
+        "nl": "Admin-instellingen vertaald in alle ondersteunde talen; logmeldingen, dashboard en objectnamen in het Engels; documentatie in het Engels en Duits; configuratie-attributen hernoemd volgens de ioBroker-conventie (port, bind) met automatische migratie",
+        "fr": "Paramètres d'administration traduits dans toutes les langues prises en charge ; messages de journal, tableau de bord et noms d'objets en anglais ; documentation en anglais et en allemand ; attributs de configuration renommés selon la convention ioBroker (port, bind) avec migration automatique",
+        "it": "Impostazioni dell'admin tradotte in tutte le lingue supportate; messaggi di log, dashboard e nomi degli oggetti in inglese; documentazione in inglese e tedesco; attributi di configurazione rinominati secondo la convenzione di ioBroker (port, bind) con migrazione automatica",
+        "es": "Ajustes del admin traducidos a todos los idiomas compatibles; mensajes de registro, panel y nombres de objetos en inglés; documentación en inglés y alemán; atributos de configuración renombrados según la convención de ioBroker (port, bind) con migración automática",
+        "pl": "Ustawienia w panelu admina przetłumaczone na wszystkie obsługiwane języki; komunikaty logu, panel i nazwy obiektów po angielsku; dokumentacja po angielsku i niemiecku; atrybuty konfiguracji przemianowane zgodnie z konwencją ioBroker (port, bind) z automatyczną migracją",
+        "uk": "Налаштування в адмінці перекладено всіма підтримуваними мовами; повідомлення журналу, панель та імена об'єктів англійською; документація англійською та німецькою; атрибути конфігурації перейменовано відповідно до угоди ioBroker (port, bind) з автоматичним перенесенням",
+        "zh-cn": "管理设置已翻译成所有支持的语言；日志消息、仪表板和对象名称改为英文；文档提供英文和德文版本；配置属性已按 ioBroker 约定重命名（port、bind）并自动迁移"
+      },
       "1.6.4": {
         "en": "Object structure fixed: parent channels 'info' and 'config' are created, and existing installations receive corrected object definitions (role of info.version)",
         "de": "Objektstruktur korrigiert: Die Elternkanäle 'info' und 'config' werden angelegt, und bestehende Installationen erhalten korrigierte Objektdefinitionen (Rolle von info.version)",
@@ -116,13 +129,17 @@
     "tier": 3,
     "extIcon": "https://raw.githubusercontent.com/Proxyyy87/ioBroker.mqtt-plus/main/admin/mqtt-plus.png",
     "localLinks": {
-      "_default": "http://%ip%:%native_serverPort%"
+      "_default": "http://%ip%:%native_port%"
     },
     "globalDependencies": [
       {
         "admin": ">=7.6.20"
       }
-    ]
+    ],
+    "docs": {
+      "en": "docs/en/README.md",
+      "de": "docs/de/README.md"
+    }
   },
   "native": {
     "targetBasePath": "mqtt.0.",
@@ -131,14 +148,14 @@
     "mappings": [],
     "syncUrl": "",
     "syncIntervalMin": 60,
-    "serverPort": 8095,
+    "port": 8095,
     "dashboardUser": "admin",
     "dashboardPassword": "",
     "dashboardTlsCert": "",
     "dashboardTlsKey": "",
     "syncCaCert": "",
     "forceSyncIntervalMin": 5,
-    "bindHost": "0.0.0.0",
+    "bind": "0.0.0.0",
     "staleAfterMin": 1440,
     "remoteSyncSkipStale": false
   },
@@ -196,7 +213,7 @@
       "_id": "info.lastSyncStatus",
       "type": "state",
       "common": {
-        "name": "Letzter Sync Status",
+        "name": "Last sync status",
         "type": "string",
         "role": "text",
         "read": true,
@@ -220,7 +237,7 @@
       "_id": "info.lastCycle",
       "type": "state",
       "common": {
-        "name": "Letzter Sync-Zyklus",
+        "name": "Last sync cycle",
         "type": "number",
         "role": "value.time",
         "read": true,
@@ -245,7 +262,7 @@
       "_id": "info.version",
       "type": "state",
       "common": {
-        "name": "Adapter-Version",
+        "name": "Adapter version",
         "type": "string",
         "role": "text",
         "read": true,
@@ -257,7 +274,7 @@
       "_id": "info.authLockouts",
       "type": "state",
       "common": {
-        "name": "Login-Sperrliste (intern)",
+        "name": "Login lockout list (internal)",
         "type": "string",
         "role": "json",
         "read": true,

@@ -55,8 +55,8 @@ specification are documented at [mqtt.org](https://mqtt.org/getting-started/).
 ### Configuration
 
 The complete configuration guide (topic mode, echo protection, sync mode, remote sync
-templates) is available in German in [admin/readme.md](admin/readme.md) – this is the same text
-that ioBroker Admin shows in the instance view.
+templates) is available in [English](docs/en/README.md) and [German](docs/de/README.md). The
+settings page in ioBroker Admin is translated into all languages supported by ioBroker.
 
 The adapter is currently in the review process for the official ioBroker repository.
 
@@ -65,6 +65,13 @@ The adapter is currently in the review process for the official ioBroker reposit
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### 1.6.5 (2026-09-28)
+* (proxy) Admin settings translated into all supported languages (i18n files, compatible with Weblate)
+* (proxy) Log messages, dashboard and object names in English
+* (proxy) Documentation available in English and German (`docs/en`, `docs/de`)
+* (proxy) Configuration attributes renamed to the ioBroker convention: `serverPort` -> `port`,
+  `bindHost` -> `bind`. Existing settings are migrated automatically on first start
+
 ### 1.6.4 (2026-09-25)
 * (proxy) Object structure fixed for the ioBroker review: parent channels `info` and `config` are
   created, and existing installations receive corrected object definitions (role of `info.version`)
