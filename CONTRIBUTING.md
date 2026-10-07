@@ -9,6 +9,7 @@ npm install
 npm run build          # compiles src/*.ts to build/
 npm run watch          # recompiles on every change
 npm run check          # type checking only
+npm run lint           # ESLint + Prettier (ioBroker shared config); `npm run lint -- --fix` fixes formatting
 npm test               # package file tests
 npm run test:integration   # starts the adapter in a temporary js-controller instance
 ```
@@ -54,10 +55,13 @@ Notes:
 
 ### Publishing a release
 
-Before tagging:
+Releases are created with [`@alcalzone/release-script`](https://github.com/AlCalzone/release-script)
+(configuration in `.releaseconfig.json`):
 
-1. Bump the version in `package.json` and `io-package.json` (`common.version`).
-2. Add a `common.news` entry for the new version in `io-package.json` (all languages).
-3. Replace `### **WORK IN PROGRESS**` in `README.md` with `### <version> (<date>)`.
-4. Run `npm run build` and commit everything.
-5. Push the tag: `git tag v<version> && git push origin v<version>`.
+1. Document the changes in `README.md` below the `### **WORK IN PROGRESS**` placeholder.
+2. Run `npm run release patch` (or `minor` / `major`).
+
+The script bumps the version in `package.json` and `io-package.json`, creates the `common.news`
+entry, turns the placeholder into `### <version> (<date>)`, runs `npm run build`, commits, tags and
+pushes. The pushed tag starts the GitHub workflow, which publishes the release to npm. Translations
+for the news entry can be generated with `npm run translate`.

@@ -1,21 +1,17 @@
 {
+  // Basis-Einstellungen für Node.js 22 (Ziel ES2022, strikte Typprüfung), siehe
+  // https://github.com/tsconfig/bases - für ein anderes Ziel das passende @tsconfig/node...-Paket nutzen.
+  "extends": "@tsconfig/node22/tsconfig.json",
   "compilerOptions": {
-    "target": "es2018",
-    "module": "commonjs",
     "outDir": "./build",
     "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
     "declaration": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    // Die Basis erlaubt nur "node"; die globalen ioBroker-Typen (Namespace ioBroker) werden zusätzlich gebraucht.
+    "types": ["@iobroker/types", "node"]
   },
-  "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "build"]
 }

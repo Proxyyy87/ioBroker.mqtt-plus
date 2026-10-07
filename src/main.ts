@@ -10,11 +10,13 @@ import axios from "axios";
 import * as http from "node:http";
 import * as https from "node:https";
 import * as crypto from "node:crypto";
-import * as net from "node:net";
+import type * as net from "node:net";
 import * as os from "node:os";
 
 // Einmalig aus package.json gelesen, statt an mehreren Stellen (User-Agent, info.version)
 // manuell zu pflegen und bei jedem Versionssprung zu vergessen.
+// package.json liegt außerhalb von rootDir (src) und kann daher nicht per import geladen werden.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const ADAPTER_VERSION: string = require("../package.json").version;
 
 interface MappingEntry {
@@ -77,6 +79,7 @@ interface SyncOptions {
 type SyncPhase = "event" | "start" | "cycle" | "force";
 
 declare global {
+    // eslint-disable-next-line @typescript-eslint/no-namespace -- übliches Muster zur Typisierung der Adapter-Konfiguration
     namespace ioBroker {
         interface AdapterConfig {
             targetBasePath: string;
@@ -177,8 +180,10 @@ class MqttPlus extends utils.Adapter {
     }
 
     private convertMqttPathToIobrokerId(mqttPath: string): string {
-        if (!mqttPath) return "unknown";
-        let cleaned = mqttPath.replace(/^[\/\.]+|[\/\.]+$/g, "");
+        if (!mqttPath) {
+            return "unknown";
+        }
+        let cleaned = mqttPath.replace(/^[/.]+|[/.]+$/g, "");
         cleaned = cleaned.replace(/\//g, ".");
         cleaned = cleaned.replace(/\s+/g, "_");
         // Zusätzlich zu / und . verbietet ioBroker weitere Zeichen in IDs (*?,;'"`<>[])
@@ -191,7 +196,9 @@ class MqttPlus extends utils.Adapter {
     // "dual": Befehle laufen über <topic>/set, der Status bleibt auf <topic> - dadurch sind
     // Schreib- und Leserichtung physisch getrennt und können sich nicht gegenseitig auslösen.
     private resolveCommandPath(entry: MappingEntry, statePath: string): string {
-        if (entry.topicMode !== "dual") return statePath;
+        if (entry.topicMode !== "dual") {
+            return statePath;
+        }
 
         const raw = (entry.commandSuffix || "").trim() || "/set";
         const suffix = this.convertMqttPathToIobrokerId(raw);
@@ -209,7 +216,7 @@ class MqttPlus extends utils.Adapter {
             this.log.warn("[Config] No MQTT target path configured - using default 'mqtt.0.'");
             base = "mqtt.0.";
         }
-        return base.endsWith(".") ? base : base + ".";
+        return base.endsWith(".") ? base : `${base}.`;
     }
 
     // Übernimmt die bis 1.6.2 verwendeten Konfigurationsnamen serverPort/bindHost einmalig in
@@ -218,19 +225,29 @@ class MqttPlus extends utils.Adapter {
     // Funktion true zurück, und onReady bricht diesen Start ab.
     private async migrateLegacyConfig(): Promise<boolean> {
         const legacy = this.config as ioBroker.AdapterConfig & Record<string, unknown>;
-        if (legacy.serverPort === undefined && legacy.bindHost === undefined) return false;
+        if (legacy.serverPort === undefined && legacy.bindHost === undefined) {
+            return false;
+        }
 
         const objId = `system.adapter.${this.namespace}`;
         const obj = await this.getForeignObjectAsync(objId);
-        if (!obj || !obj.native) return false;
+        if (!obj || !obj.native) {
+            return false;
+        }
 
         const native = obj.native as Record<string, unknown>;
-        if (native.serverPort !== undefined) native.port = native.serverPort;
-        if (native.bindHost !== undefined) native.bind = native.bindHost;
+        if (native.serverPort !== undefined) {
+            native.port = native.serverPort;
+        }
+        if (native.bindHost !== undefined) {
+            native.bind = native.bindHost;
+        }
         delete native.serverPort;
         delete native.bindHost;
 
-        this.log.info(`[Setup] Configuration migrated: serverPort/bindHost -> port=${native.port}, bind=${native.bind}. Instance restarts.`);
+        this.log.info(
+            `[Setup] Configuration migrated: serverPort/bindHost -> port=${String(native.port)}, bind=${String(native.bind)}. Instance restarts.`,
+        );
         await this.setForeignObjectAsync(objId, obj);
         // Normalerweise startet js-controller die Instanz wegen der geänderten Konfiguration
         // selbst neu. Falls das ausbleibt, fordert der Adapter den Neustart selbst an - sonst
@@ -244,24 +261,32 @@ class MqttPlus extends utils.Adapter {
     }
 
     private async onReady(): Promise<void> {
-        if (await this.migrateLegacyConfig()) return;
+        if (await this.migrateLegacyConfig()) {
+            return;
+        }
 
         await this.initObjects();
         await this.loadAuthLockouts();
         await this.setStateAsync("info.version", ADAPTER_VERSION, true);
         this.log.info(`[Setup] MQTT bridge manager v${ADAPTER_VERSION} starting...`);
         const staleMin = this.parseMinutes(this.config.staleAfterMin) ?? MqttPlus.DEFAULT_STALE_AFTER_MIN;
-        this.log.info(staleMin > 0
-            ? `[Setup] Staleness check: sources without update for ${staleMin} min are not mirrored on start/cycle/force sync.`
-            : "[Setup] Staleness check (age) disabled globally - only quality (q) is checked.");
+        this.log.info(
+            staleMin > 0
+                ? `[Setup] Staleness check: sources without update for ${staleMin} min are not mirrored on start/cycle/force sync.`
+                : "[Setup] Staleness check (age) disabled globally - only quality (q) is checked.",
+        );
         await this.setupBridge();
 
         const port = this.config.port || 8095;
         const hasTls = !!(this.config.dashboardTlsCert && this.config.dashboardTlsKey);
         if (!this.config.dashboardPassword) {
-            this.log.warn("[Dashboard] No password set - the web server is reachable without access protection! Please set a password in the adapter settings (tab 'Web Dashboard').");
+            this.log.warn(
+                "[Dashboard] No password set - the web server is reachable without access protection! Please set a password in the adapter settings (tab 'Web Dashboard').",
+            );
         } else if (!hasTls) {
-            this.log.warn("[Dashboard] A password is set, but no TLS certificate is configured - credentials are transmitted unencrypted (HTTP). Add certificate/key in the tab 'Web Dashboard' for encryption.");
+            this.log.warn(
+                "[Dashboard] A password is set, but no TLS certificate is configured - credentials are transmitted unencrypted (HTTP). Add certificate/key in the tab 'Web Dashboard' for encryption.",
+            );
         }
         this.startWebServer(port);
         await this.updateDashboardUrlState(port);
@@ -277,9 +302,12 @@ class MqttPlus extends utils.Adapter {
         const forceSyncMin = this.config.forceSyncIntervalMin ?? 5;
         if (forceSyncMin > 0) {
             this.log.info(`Starting force sync interval: every ${forceSyncMin} minutes (heals out-of-sync states)`);
-            this.forceSyncInterval = this.setInterval(() => {
-                this.runForceSync().catch(e => this.log.error(`Force sync error: ${e.message}`));
-            }, forceSyncMin * 60 * 1000);
+            this.forceSyncInterval = this.setInterval(
+                () => {
+                    this.runForceSync().catch(e => this.log.error(`Force sync error: ${e.message}`));
+                },
+                forceSyncMin * 60 * 1000,
+            );
         } else {
             this.log.info("Force sync interval disabled (configuration).");
         }
@@ -289,9 +317,12 @@ class MqttPlus extends utils.Adapter {
             const syncIntervalMin = this.config.syncIntervalMin || 60;
             this.log.info(`Starting remote sync: every ${syncIntervalMin} minutes`);
             this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
-            this.syncInterval = this.setInterval(() => {
-                this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
-            }, syncIntervalMin * 60 * 1000);
+            this.syncInterval = this.setInterval(
+                () => {
+                    this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
+                },
+                syncIntervalMin * 60 * 1000,
+            );
         }
 
         this.updateWatchdog("Running", true);
@@ -304,7 +335,9 @@ class MqttPlus extends utils.Adapter {
             let found = false;
             for (const name in ifaces) {
                 const iface = ifaces[name];
-                if (!iface) continue;
+                if (!iface) {
+                    continue;
+                }
                 for (const alias of iface) {
                     if (alias.family === "IPv4" && !alias.internal) {
                         ip = alias.address;
@@ -312,7 +345,9 @@ class MqttPlus extends utils.Adapter {
                         break;
                     }
                 }
-                if (found) break;
+                if (found) {
+                    break;
+                }
             }
         } catch (e: any) {
             this.log.debug(`[Setup] Could not determine network interfaces: ${e.message}`);
@@ -324,31 +359,42 @@ class MqttPlus extends utils.Adapter {
     }
 
     private async onMessage(obj: ioBroker.Message): Promise<void> {
-        if (!obj || typeof obj !== "object") return;
+        if (!obj || typeof obj !== "object") {
+            return;
+        }
 
         if (obj.command === "generateJson") {
             try {
-                const tree = await this.generateJsonTree();
-                if (obj.callback) this.sendTo(obj.from, obj.command, tree, obj.callback);
+                const tree = this.generateJsonTree();
+                if (obj.callback) {
+                    this.sendTo(obj.from, obj.command, tree, obj.callback);
+                }
             } catch (e: any) {
-                if (obj.callback) this.sendTo(obj.from, obj.command, { error: e.message }, obj.callback);
+                if (obj.callback) {
+                    this.sendTo(obj.from, obj.command, { error: e.message }, obj.callback);
+                }
             }
-        }
-        else if (obj.command === "checkSync") {
+        } else if (obj.command === "checkSync") {
             this.log.info("Manual sync test requested...");
             try {
                 const result = await this.runRemoteSync(true);
                 if (obj.callback) {
-                    this.sendTo(obj.from, obj.command, {
-                        success: result.success,
-                        result: result.message
-                    }, obj.callback);
+                    this.sendTo(
+                        obj.from,
+                        obj.command,
+                        {
+                            success: result.success,
+                            result: result.message,
+                        },
+                        obj.callback,
+                    );
                 }
             } catch (e: any) {
-                 if (obj.callback) this.sendTo(obj.from, obj.command, { error: e.message }, obj.callback);
+                if (obj.callback) {
+                    this.sendTo(obj.from, obj.command, { error: e.message }, obj.callback);
+                }
             }
-        }
-        else if (obj.callback) {
+        } else if (obj.callback) {
             this.sendTo(obj.from, obj.command, { error: "unknown command" }, obj.callback);
         }
     }
@@ -360,22 +406,103 @@ class MqttPlus extends utils.Adapter {
     private static readonly OWN_OBJECTS: { id: string; obj: ioBroker.SettableObject }[] = [
         { id: "info", obj: { type: "channel", common: { name: "Information" }, native: {} } },
         { id: "config", obj: { type: "channel", common: { name: "Configuration" }, native: {} } },
-        { id: "watchdog", obj: { type: "state", common: { name: "MQTT Bridge Watchdog", type: "string", role: "text", read: true, write: false }, native: {} } },
-        { id: "config.syncTemplate", obj: { type: "state", common: { name: "Remote Sync JSON Template", type: "string", role: "json", read: true, write: true }, native: {} } },
-        { id: "info.dashboardUrl", obj: { type: "state", common: { name: "Dashboard URL", type: "string", role: "url", read: true, write: false }, native: {} } },
-        { id: "info.lastSyncStatus", obj: { type: "state", common: { name: "Last sync status", type: "string", role: "text", read: true, write: false }, native: {} } },
-        { id: "info.status", obj: { type: "state", common: { name: "Status", type: "string", role: "text", read: true, write: false }, native: {} } },
-        { id: "info.lastCycle", obj: { type: "state", common: { name: "Last sync cycle", type: "number", role: "value.time", read: true, write: false }, native: {} } },
-        { id: "info.connection", obj: { type: "state", common: { name: "Connected", type: "boolean", role: "indicator.connected", read: true, write: false, def: false }, native: {} } },
-        { id: "info.version", obj: { type: "state", common: { name: "Adapter version", type: "string", role: "text", read: true, write: false }, native: {} } },
-        { id: "info.authLockouts", obj: { type: "state", common: { name: "Login lockout list (internal)", type: "string", role: "json", read: true, write: false, def: "{}" }, native: {} } },
+        {
+            id: "watchdog",
+            obj: {
+                type: "state",
+                common: { name: "MQTT Bridge Watchdog", type: "string", role: "text", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "config.syncTemplate",
+            obj: {
+                type: "state",
+                common: { name: "Remote Sync JSON Template", type: "string", role: "json", read: true, write: true },
+                native: {},
+            },
+        },
+        {
+            id: "info.dashboardUrl",
+            obj: {
+                type: "state",
+                common: { name: "Dashboard URL", type: "string", role: "url", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "info.lastSyncStatus",
+            obj: {
+                type: "state",
+                common: { name: "Last sync status", type: "string", role: "text", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "info.status",
+            obj: {
+                type: "state",
+                common: { name: "Status", type: "string", role: "text", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "info.lastCycle",
+            obj: {
+                type: "state",
+                common: { name: "Last sync cycle", type: "number", role: "value.time", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "info.connection",
+            obj: {
+                type: "state",
+                common: {
+                    name: "Connected",
+                    type: "boolean",
+                    role: "indicator.connected",
+                    read: true,
+                    write: false,
+                    def: false,
+                },
+                native: {},
+            },
+        },
+        {
+            id: "info.version",
+            obj: {
+                type: "state",
+                common: { name: "Adapter version", type: "string", role: "text", read: true, write: false },
+                native: {},
+            },
+        },
+        {
+            id: "info.authLockouts",
+            obj: {
+                type: "state",
+                common: {
+                    name: "Login lockout list (internal)",
+                    type: "string",
+                    role: "json",
+                    read: true,
+                    write: false,
+                    def: "{}",
+                },
+                native: {},
+            },
+        },
     ];
 
     private async initObjects(): Promise<void> {
         for (const { id, obj } of MqttPlus.OWN_OBJECTS) {
-            const def = id === "config.syncTemplate"
-                ? { ...obj, common: { ...obj.common, def: this.getDefaultSyncTemplate() } } as ioBroker.SettableObject
-                : obj;
+            const def =
+                id === "config.syncTemplate"
+                    ? ({
+                          ...obj,
+                          common: { ...obj.common, def: this.getDefaultSyncTemplate() },
+                      } as ioBroker.SettableObject)
+                    : obj;
             await this.extendObject(id, def);
         }
     }
@@ -385,11 +512,15 @@ class MqttPlus extends utils.Adapter {
     private async loadAuthLockouts(): Promise<void> {
         try {
             const state = await this.getStateAsync("info.authLockouts");
-            if (!state || !state.val) return;
+            if (!state || !state.val) {
+                return;
+            }
             const stored = JSON.parse(state.val as string) as Record<string, { count: number; lockedUntil: number }>;
             const now = Date.now();
             for (const [ip, entry] of Object.entries(stored)) {
-                if (entry.lockedUntil > now) this.failedAuthAttempts.set(ip, entry);
+                if (entry.lockedUntil > now) {
+                    this.failedAuthAttempts.set(ip, entry);
+                }
             }
         } catch (e: any) {
             this.log.debug(`[Dashboard] Could not load lockout list: ${e.message}`);
@@ -402,9 +533,11 @@ class MqttPlus extends utils.Adapter {
         const now = Date.now();
         const active: Record<string, { count: number; lockedUntil: number }> = {};
         for (const [ip, entry] of this.failedAuthAttempts) {
-            if (entry.lockedUntil > now) active[ip] = entry;
+            if (entry.lockedUntil > now) {
+                active[ip] = entry;
+            }
         }
-        this.setState("info.authLockouts", JSON.stringify(active), true);
+        void this.setState("info.authLockouts", JSON.stringify(active), true);
     }
 
     private async setupBridge(): Promise<void> {
@@ -416,14 +549,18 @@ class MqttPlus extends utils.Adapter {
         this.sourceTypeCache.clear();
 
         const mappings = this.config.mappings || [];
-        if (!mappings || !Array.isArray(mappings)) return;
+        if (!mappings || !Array.isArray(mappings)) {
+            return;
+        }
 
         const basePath = this.getValidatedBasePath();
         const seenTargetPaths = new Map<string, string>();
         const subscribeIds: string[] = [];
 
         for (const entry of mappings) {
-            if (!entry.id || !entry.mqttName) continue;
+            if (!entry.id || !entry.mqttName) {
+                continue;
+            }
 
             const cleanSuffix = this.convertMqttPathToIobrokerId(entry.mqttName);
             const fullTargetPath = `${basePath}${cleanSuffix}`;
@@ -450,7 +587,9 @@ class MqttPlus extends utils.Adapter {
             if (entry.dir === "out" || entry.dir === "both") {
                 const prevOwner = seenTargetPaths.get(fullTargetPath);
                 if (prevOwner && prevOwner !== entry.id) {
-                    this.log.warn(`[Setup] Duplicate target topic "${fullTargetPath}": written by both "${prevOwner}" and "${entry.id}" - the values overwrite each other!`);
+                    this.log.warn(
+                        `[Setup] Duplicate target topic "${fullTargetPath}": written by both "${prevOwner}" and "${entry.id}" - the values overwrite each other!`,
+                    );
                 } else {
                     seenTargetPaths.set(fullTargetPath, entry.id);
                 }
@@ -492,15 +631,26 @@ class MqttPlus extends utils.Adapter {
         // frisches ts, obwohl sich nichts geändert hat (und ein totes Gerät sähe aktiv aus).
         const outIds = [...this.sourceToMappings.keys()];
         const outStates = outIds.length ? await this.getForeignStatesAsync(outIds) : {};
-        const outTargetStates = await this.getTargetStates(outIds.flatMap(id => this.sourceToMappings.get(id)!.map(e => e.fullTargetPath!)));
+        const outTargetStates = await this.getTargetStates(
+            outIds.flatMap(id => this.sourceToMappings.get(id)!.map(e => e.fullTargetPath!)),
+        );
         for (const [id, entries] of this.sourceToMappings) {
             const state = outStates[id];
             for (const entry of entries) {
                 if (entry.dir === "out" || entry.dir === "both") {
-                    if (!state || !this.passesAckFilter(entry, state)) continue;
+                    if (!state || !this.passesAckFilter(entry, state)) {
+                        continue;
+                    }
                     const label = entry.dir === "both" ? "IOB -> MQTT (START: both)" : "IOB -> MQTT (START)";
-                    await this.syncValue(id, entry.fullTargetPath!, label, "START-UP", entry.type, state,
-                        this.syncOptionsFor(entry, "start", outTargetStates[entry.fullTargetPath!]));
+                    await this.syncValue(
+                        id,
+                        entry.fullTargetPath!,
+                        label,
+                        "START-UP",
+                        entry.type,
+                        state,
+                        this.syncOptionsFor(entry, "start", outTargetStates[entry.fullTargetPath!]),
+                    );
                 }
             }
         }
@@ -511,18 +661,31 @@ class MqttPlus extends utils.Adapter {
         // gesendete Kommando das Gerät erneut schalten. Deshalb nur "single" initial abgleichen.
         const inOnlyTargets: string[] = [];
         for (const [commandPath, entries] of this.targetToMappings) {
-            if (entries.some(e => e.dir === "in" && e.topicMode !== "dual")) inOnlyTargets.push(commandPath);
+            if (entries.some(e => e.dir === "in" && e.topicMode !== "dual")) {
+                inOnlyTargets.push(commandPath);
+            }
         }
         const inStates = inOnlyTargets.length ? await this.getForeignStatesAsync(inOnlyTargets) : {};
-        const inTargetStates = await this.getTargetStates(inOnlyTargets.flatMap(p => this.targetToMappings.get(p)!.map(e => e.id)));
+        const inTargetStates = await this.getTargetStates(
+            inOnlyTargets.flatMap(p => this.targetToMappings.get(p)!.map(e => e.id)),
+        );
         for (const [commandPath, entries] of this.targetToMappings) {
             const state = inStates[commandPath];
             for (const entry of entries) {
                 if (entry.dir === "in" && entry.topicMode !== "dual") {
                     // Wie im Event-Pfad (onStateChange) nur echte Broker-Werte (ack=true) übernehmen.
-                    if (!state || state.ack !== true) continue;
-                    await this.syncValue(commandPath, entry.id, "MQTT -> IOB (START)", "START-UP", entry.type, state,
-                        this.syncOptionsFor(entry, "start", inTargetStates[entry.id]));
+                    if (!state || state.ack !== true) {
+                        continue;
+                    }
+                    await this.syncValue(
+                        commandPath,
+                        entry.id,
+                        "MQTT -> IOB (START)",
+                        "START-UP",
+                        entry.type,
+                        state,
+                        this.syncOptionsFor(entry, "start", inTargetStates[entry.id]),
+                    );
                 }
             }
         }
@@ -531,7 +694,9 @@ class MqttPlus extends utils.Adapter {
     }
 
     private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
-        if (!state) return;
+        if (!state) {
+            return;
+        }
 
         // 1. Ist es eine Quelle? (IOB -> MQTT)
         const sourceMatches = this.sourceToMappings.get(id);
@@ -548,7 +713,7 @@ class MqttPlus extends utils.Adapter {
                     // Keine Aktualitätsprüfung: das Ereignis selbst belegt, dass die Quelle lebt.
                     await this.syncValue(id, entry.fullTargetPath, dirLabel, "LOCAL-CHANGE", entry.type, state, {
                         ...this.syncOptionsFor(entry, "event"),
-                        useEchoGuard: entry.ackFilter === "any"
+                        useEchoGuard: entry.ackFilter === "any",
                     });
                 }
             }
@@ -558,7 +723,9 @@ class MqttPlus extends utils.Adapter {
         const targetMatches = this.targetToMappings.get(id);
         if (targetMatches) {
             for (const entry of targetMatches) {
-                if (!entry.commandPath) continue;
+                if (!entry.commandPath) {
+                    continue;
+                }
 
                 // Die Ack-Prüfung ist nur im Modus "single" nötig - dort teilen sich Status und
                 // Befehl ein Topic, und ein ack=false-Ereignis wäre unser eigener Schreibvorgang
@@ -568,10 +735,13 @@ class MqttPlus extends utils.Adapter {
                 // unbestätigten Steuerbefehl (ack=false) weiter - der Schaltbefehl würde dann
                 // stillschweigend verworfen.
                 const isDual = entry.topicMode === "dual";
-                if (!isDual && state.ack !== true) continue;
+                if (!isDual && state.ack !== true) {
+                    continue;
+                }
 
                 const modeLabel = isDual ? " [dual]" : "";
-                const dirLabel = entry.dir === "both" ? `MQTT -> IOB (Config: both${modeLabel})` : `MQTT -> IOB${modeLabel}`;
+                const dirLabel =
+                    entry.dir === "both" ? `MQTT -> IOB (Config: both${modeLabel})` : `MQTT -> IOB${modeLabel}`;
                 // Bei "both" ist dies die Rückrichtung des konfigurierten Typs (z.B. boolToNum <-> numToBool).
                 // Der Wert selbst wird dabei nie invertiert (true bleibt true), nur die Darstellung angepasst.
                 const effectiveType = entry.dir === "both" ? this.invertConversionType(entry.type) : entry.type;
@@ -581,13 +751,29 @@ class MqttPlus extends utils.Adapter {
                 const eventOpts: SyncOptions = isDual
                     ? { decimals: entry.decimals, preserveTimestamp: false, isCommand: true }
                     : this.syncOptionsFor(entry, "event");
-                await this.syncValue(entry.commandPath, entry.id, dirLabel, "MQTT-EVENT", effectiveType, state, eventOpts);
+                await this.syncValue(
+                    entry.commandPath,
+                    entry.id,
+                    dirLabel,
+                    "MQTT-EVENT",
+                    effectiveType,
+                    state,
+                    eventOpts,
+                );
             }
         }
     }
 
     /**
      * Sync Funktion. Gibt true zurück, wenn tatsächlich geschrieben wurde.
+     *
+     * @param sourceId ID des Quell-States, aus dem gelesen wird
+     * @param targetId ID des Ziel-States, in den geschrieben wird
+     * @param dirLabel Richtungsbezeichnung für die Log-Ausgabe
+     * @param triggerSource Auslöser (z.B. START-UP, CYCLE, FORCE-SYNC) für die Log-Ausgabe
+     * @param convType Konvertierungstyp (auto, round, boolToNum, numToBool)
+     * @param stateObj bereits gelesener Quell-State; fehlt er, wird er nachgeladen
+     * @param opts Verhalten dieses Laufs (Cache, Aktualitätsprüfung, Zeitstempel, ...)
      */
     private async syncValue(
         sourceId: string,
@@ -596,7 +782,7 @@ class MqttPlus extends utils.Adapter {
         triggerSource: string,
         convType: string,
         stateObj: ioBroker.State | null | undefined,
-        opts: SyncOptions = {}
+        opts: SyncOptions = {},
     ): Promise<boolean> {
         const force = opts.force === true;
         try {
@@ -604,10 +790,14 @@ class MqttPlus extends utils.Adapter {
             if (!srcState) {
                 srcState = await this.getForeignStateAsync(sourceId);
             }
-            if (!srcState) return false;
+            if (!srcState) {
+                return false;
+            }
             const val = srcState.val;
 
-            if (val === null || val === undefined) return false;
+            if (val === null || val === undefined) {
+                return false;
+            }
 
             // --- 0. AKTUALITÄT DER QUELLE ---
             // Nur bei Start/Cycle/Force-Sync: dort liegt kein frisches Ereignis vor, der Wert kann
@@ -617,9 +807,13 @@ class MqttPlus extends utils.Adapter {
                 if (staleReason) {
                     if (!this.staleSources.has(sourceId)) {
                         this.staleSources.add(sourceId);
-                        this.log.info(`[Staleness] Source ${sourceId} is considered inactive (${staleReason}) - not mirrored to ${targetId} until its next real update.`);
+                        this.log.info(
+                            `[Staleness] Source ${sourceId} is considered inactive (${staleReason}) - not mirrored to ${targetId} until its next real update.`,
+                        );
                     } else {
-                        this.log.debug(`[Staleness] (${triggerSource}) Skipping ${sourceId} -> ${targetId}: ${staleReason}`);
+                        this.log.debug(
+                            `[Staleness] (${triggerSource}) Skipping ${sourceId} -> ${targetId}: ${staleReason}`,
+                        );
                     }
                     return false;
                 }
@@ -637,7 +831,9 @@ class MqttPlus extends utils.Adapter {
                 this.pendingWrites.delete(sourceId);
                 const stillFresh = Date.now() - pending.ts < MqttPlus.PENDING_WRITE_TTL_MS;
                 if (opts.useEchoGuard && stillFresh && this.sameValue(pending.value, val)) {
-                    this.log.debug(`[Echo guard] (${triggerSource}) Ignoring echo ${sourceId} -> ${targetId} (value '${val}' equals own write)`);
+                    this.log.debug(
+                        `[Echo guard] (${triggerSource}) Ignoring echo ${sourceId} -> ${targetId} (value '${val}' equals own write)`,
+                    );
                     return false;
                 }
             }
@@ -651,7 +847,8 @@ class MqttPlus extends utils.Adapter {
             // zählt trotzdem als weiterzureichen - das Ziel bleibt so aktuell, solange das Gerät
             // tatsächlich meldet, und veraltet ehrlich, sobald es verstummt.
             const srcTs = typeof srcState.ts === "number" ? srcState.ts : 0;
-            const isRefresh = (knownTs: number | undefined) => opts.passRefresh === true && srcTs > (knownTs ?? 0);
+            const isRefresh = (knownTs: number | undefined): boolean =>
+                opts.passRefresh === true && srcTs > (knownTs ?? 0);
 
             // --- 2. VALUE CACHE (Ping-Pong Schutz für langsame Echos) ---
             // WICHTIG: Wenn force = true ist, ignorieren wir den Cache komplett!
@@ -659,8 +856,15 @@ class MqttPlus extends utils.Adapter {
             // eingeschaltet (Cache: true), am Gerät ausgeschaltet (läuft über die Gegenrichtung,
             // der Cache bleibt true), erneutes Einschalten per Dashboard wurde als "redundant"
             // verworfen. Erst aus und wieder ein half.
-            if (!force && !opts.isCommand && this.sameValue(this.lastSyncValues.get(cacheKey), processedValue) && !isRefresh(this.lastSyncTs.get(cacheKey))) {
-                this.log.debug(`[Cache guard] Blocking redundant value for ${targetId} (value '${processedValue}' equals the last sent value)`);
+            if (
+                !force &&
+                !opts.isCommand &&
+                this.sameValue(this.lastSyncValues.get(cacheKey), processedValue) &&
+                !isRefresh(this.lastSyncTs.get(cacheKey))
+            ) {
+                this.log.debug(
+                    `[Cache guard] Blocking redundant value for ${targetId} (value '${processedValue}' equals the last sent value)`,
+                );
                 return false;
             }
 
@@ -668,10 +872,16 @@ class MqttPlus extends utils.Adapter {
             // Steht auf der Zielseite bereits der richtige Wert, gibt es nichts zu heilen. Ein
             // erneutes Schreiben würde nur ts/lc des Ziels auffrischen und eine MQTT-Nachricht
             // auslösen - und damit ein inaktives Gerät als aktiv erscheinen lassen.
-            if (opts.targetState && this.sameValue(opts.targetState.val, processedValue) && !isRefresh(opts.targetState.ts)) {
+            if (
+                opts.targetState &&
+                this.sameValue(opts.targetState.val, processedValue) &&
+                !isRefresh(opts.targetState.ts)
+            ) {
                 this.lastSyncValues.set(cacheKey, processedValue);
                 this.lastSyncTs.set(cacheKey, srcTs);
-                this.log.debug(`[Target guard] (${triggerSource}) ${targetId} already has the value '${processedValue}' - no write needed`);
+                this.log.debug(
+                    `[Target guard] (${triggerSource}) ${targetId} already has the value '${processedValue}' - no write needed`,
+                );
                 return false;
             }
 
@@ -688,15 +898,23 @@ class MqttPlus extends utils.Adapter {
             // dagegen den aktuellen Zeitpunkt - ein Befehl ist tatsächlich neu.
             const newState: ioBroker.SettableState = { val: processedValue, ack: false, c: "mqtt-plus" };
             if (opts.preserveTimestamp) {
-                if (typeof srcState.ts === "number") newState.ts = srcState.ts;
-                if (typeof srcState.lc === "number") newState.lc = srcState.lc;
-                if (typeof srcState.q === "number") newState.q = srcState.q;
+                if (typeof srcState.ts === "number") {
+                    newState.ts = srcState.ts;
+                }
+                if (typeof srcState.lc === "number") {
+                    newState.lc = srcState.lc;
+                }
+                if (typeof srcState.q === "number") {
+                    newState.q = srcState.q;
+                }
             }
             await this.setForeignStateAsync(targetId, newState);
 
             if (this.config.logTransfers) {
                 const forceLabel = force ? "[FORCED] " : "";
-                this.log.info(`${forceLabel}[${dirLabel}] (${triggerSource}) ${val} -> ${processedValue} (${targetId})`);
+                this.log.info(
+                    `${forceLabel}[${dirLabel}] (${triggerSource}) ${val} -> ${processedValue} (${targetId})`,
+                );
             }
             this.updateWatchdog("Running");
             return true;
@@ -724,19 +942,27 @@ class MqttPlus extends utils.Adapter {
         const opts: SyncOptions = {
             decimals: entry.decimals,
             preserveTimestamp: true,
-            passRefresh: entry.syncMode === "refresh"
+            passRefresh: entry.syncMode === "refresh",
         };
-        if (phase === "event") return opts;
+        if (phase === "event") {
+            return opts;
+        }
         opts.requireAlive = true;
         opts.staleLimitMs = this.getStaleLimitMs(entry);
-        if (phase === "force") opts.force = true;
-        if (phase === "start" || phase === "force") opts.targetState = targetState ?? null;
+        if (phase === "force") {
+            opts.force = true;
+        }
+        if (phase === "start" || phase === "force") {
+            opts.targetState = targetState ?? null;
+        }
         return opts;
     }
 
     // Liest eine Minuten-Angabe aus der Config tolerant ein: leer/ungültig -> undefined.
     private parseMinutes(raw: any): number | undefined {
-        if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
+        if (raw === undefined || raw === null || String(raw).trim() === "") {
+            return undefined;
+        }
         const n = Number(raw);
         return isNaN(n) || n < 0 ? undefined : n;
     }
@@ -757,23 +983,31 @@ class MqttPlus extends utils.Adapter {
         }
         if (staleLimitMs > 0 && typeof state.ts === "number") {
             const age = Date.now() - state.ts;
-            if (age > staleLimitMs) return `last update ${this.formatAge(age)} ago`;
+            if (age > staleLimitMs) {
+                return `last update ${this.formatAge(age)} ago`;
+            }
         }
         return null;
     }
 
     private formatAge(ms: number): string {
         const min = Math.round(ms / 60_000);
-        if (min < 120) return `${min} min`;
+        if (min < 120) {
+            return `${min} min`;
+        }
         const h = Math.round(min / 60);
-        if (h < 48) return `${h} h`;
+        if (h < 48) {
+            return `${h} h`;
+        }
         return `${Math.round(h / 24)} days`;
     }
 
     // Liest die aktuellen Werte der Zielobjekte gebündelt (für den Zielvergleich bei Start/Force).
     private async getTargetStates(ids: string[]): Promise<Record<string, ioBroker.State | null | undefined>> {
         const unique = [...new Set(ids.filter(Boolean))];
-        if (!unique.length) return {};
+        if (!unique.length) {
+            return {};
+        }
         try {
             return await this.getForeignStatesAsync(unique);
         } catch (e: any) {
@@ -786,9 +1020,12 @@ class MqttPlus extends utils.Adapter {
     // round/auto sind richtungsunabhängig symmetrisch und bleiben unverändert.
     private invertConversionType(type: string): string {
         switch (type) {
-            case "boolToNum": return "numToBool";
-            case "numToBool": return "boolToNum";
-            default: return type;
+            case "boolToNum":
+                return "numToBool";
+            case "numToBool":
+                return "boolToNum";
+            default:
+                return type;
         }
     }
 
@@ -797,8 +1034,12 @@ class MqttPlus extends utils.Adapter {
     private toBoolean(value: any): boolean {
         if (typeof value === "string") {
             const normalized = value.trim().toLowerCase();
-            if (normalized === "0" || normalized === "false" || normalized === "off" || normalized === "") return false;
-            if (normalized === "1" || normalized === "true" || normalized === "on") return true;
+            if (normalized === "0" || normalized === "false" || normalized === "off" || normalized === "") {
+                return false;
+            }
+            if (normalized === "1" || normalized === "true" || normalized === "on") {
+                return true;
+            }
         }
         return !!value;
     }
@@ -808,21 +1049,42 @@ class MqttPlus extends utils.Adapter {
     // vorliegt, obwohl er inhaltlich identisch ist - mit Folgen in beide Richtungen (verpasste
     // Echo-Erkennung oder verpasste Cache-Treffer).
     private sameValue(a: any, b: any): boolean {
-        if (a === b) return true;
-        if (a === null || a === undefined || b === null || b === undefined) return false;
+        if (a === b) {
+            return true;
+        }
+        if (a === null || a === undefined || b === null || b === undefined) {
+            return false;
+        }
 
-        const numA = typeof a === "number" ? a : (typeof a === "string" && a.trim() !== "" && !isNaN(Number(a)) ? Number(a) : null);
-        const numB = typeof b === "number" ? b : (typeof b === "string" && b.trim() !== "" && !isNaN(Number(b)) ? Number(b) : null);
-        if (numA !== null && numB !== null) return numA === numB;
+        const numA =
+            typeof a === "number"
+                ? a
+                : typeof a === "string" && a.trim() !== "" && !isNaN(Number(a))
+                  ? Number(a)
+                  : null;
+        const numB =
+            typeof b === "number"
+                ? b
+                : typeof b === "string" && b.trim() !== "" && !isNaN(Number(b))
+                  ? Number(b)
+                  : null;
+        if (numA !== null && numB !== null) {
+            return numA === numB;
+        }
 
-        const isBoolLike = (v: any) => typeof v === "boolean" || (typeof v === "string" && ["true", "false"].includes(v.trim().toLowerCase()));
-        if (isBoolLike(a) && isBoolLike(b)) return this.toBoolean(a) === this.toBoolean(b);
+        const isBoolLike = (v: any): boolean =>
+            typeof v === "boolean" || (typeof v === "string" && ["true", "false"].includes(v.trim().toLowerCase()));
+        if (isBoolLike(a) && isBoolLike(b)) {
+            return this.toBoolean(a) === this.toBoolean(b);
+        }
 
         return String(a) === String(b);
     }
 
     private convertType(value: any, targetType: string, targetId: string, decimals: number = 2): any {
-        if (value === null || value === undefined) return value;
+        if (value === null || value === undefined) {
+            return value;
+        }
 
         switch (targetType) {
             case "boolToNum":
@@ -831,7 +1093,9 @@ class MqttPlus extends utils.Adapter {
                 return this.toBoolean(value);
             case "round": {
                 const factor = Math.pow(10, decimals);
-                if (typeof value === "number") return Math.round(value * factor) / factor;
+                if (typeof value === "number") {
+                    return Math.round(value * factor) / factor;
+                }
                 const num = parseFloat(value);
                 return isNaN(num) ? value : Math.round(num * factor) / factor;
             }
@@ -840,7 +1104,9 @@ class MqttPlus extends utils.Adapter {
                 // (aus ensureAdapterObject bekannt) automatisch konvertieren statt anhand einer
                 // fragilen Namensheuristik.
                 const knownType = this.targetTypeCache.get(targetId);
-                if (knownType === "boolean") return this.toBoolean(value);
+                if (knownType === "boolean") {
+                    return this.toBoolean(value);
+                }
                 if (knownType === "number") {
                     const num = typeof value === "number" ? value : parseFloat(value);
                     return isNaN(num) ? value : num;
@@ -856,7 +1122,9 @@ class MqttPlus extends utils.Adapter {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
             const obj = await this.getForeignObjectAsync(id);
-            if (obj) return;
+            if (obj) {
+                return;
+            }
             await this.sleep(100);
         }
     }
@@ -867,10 +1135,10 @@ class MqttPlus extends utils.Adapter {
             this.log.warn(`[Setup] Invalid target path "${targetPath}" (base path too short) - skipped.`);
             return;
         }
-        let currentPath = parts[0] + "." + parts[1];
+        let currentPath = `${parts[0]}.${parts[1]}`;
 
         for (let i = 2; i < parts.length - 1; i++) {
-            currentPath += "." + parts[i];
+            currentPath += `.${parts[i]}`;
             try {
                 const exists = await this.getForeignObjectAsync(currentPath);
                 if (!exists) {
@@ -878,7 +1146,7 @@ class MqttPlus extends utils.Adapter {
                         _id: currentPath,
                         type: "folder",
                         common: { name: parts[i] },
-                        native: {}
+                        native: {},
                     });
                 }
             } catch (e: any) {
@@ -897,7 +1165,9 @@ class MqttPlus extends utils.Adapter {
                 if (sObj && sObj.common) {
                     type = sObj.common.type || "mixed";
                     role = sObj.common.role || "variable";
-                    if (!unit) unit = sObj.common.unit;
+                    if (!unit) {
+                        unit = sObj.common.unit;
+                    }
                 }
 
                 if (targetPath.includes("Switch") || targetPath.includes("Schalter")) {
@@ -914,9 +1184,9 @@ class MqttPlus extends utils.Adapter {
                         role: role,
                         unit: unit,
                         read: true,
-                        write: true
+                        write: true,
                     },
-                    native: {}
+                    native: {},
                 });
 
                 this.targetTypeCache.set(targetPath, type);
@@ -933,19 +1203,33 @@ class MqttPlus extends utils.Adapter {
      * Regulärer Cycle Sync: Prüft mit Cache (produziert keinen massiven Funkverkehr)
      */
     private async runCycleSync(): Promise<void> {
-        if (this.syncRunning || this.unloaded) return;
+        if (this.syncRunning || this.unloaded) {
+            return;
+        }
         this.syncRunning = true;
         try {
             const ids = [...this.sourceToMappings.keys()];
             const states = ids.length ? await this.getForeignStatesAsync(ids) : {};
             for (const [id, entries] of this.sourceToMappings) {
                 const state = states[id];
-                if (!state) continue;
+                if (!state) {
+                    continue;
+                }
                 for (const entry of entries) {
                     if (entry.fullTargetPath && (entry.dir === "out" || entry.dir === "both")) {
-                        if (!this.passesAckFilter(entry, state)) continue;
+                        if (!this.passesAckFilter(entry, state)) {
+                            continue;
+                        }
                         const label = entry.dir === "both" ? "IOB -> MQTT (CYCLE: both)" : "IOB -> MQTT (CYCLE)";
-                        await this.syncValue(id, entry.fullTargetPath, label, "CYCLE", entry.type, state, this.syncOptionsFor(entry, "cycle"));
+                        await this.syncValue(
+                            id,
+                            entry.fullTargetPath,
+                            label,
+                            "CYCLE",
+                            entry.type,
+                            state,
+                            this.syncOptionsFor(entry, "cycle"),
+                        );
                     }
                 }
             }
@@ -964,7 +1248,9 @@ class MqttPlus extends utils.Adapter {
      * die Schreibvorgänge, um Funkbudget (Zigbee/433MHz) nicht als Burst zu belasten.
      */
     private async runForceSync(): Promise<void> {
-        if (this.syncRunning || this.unloaded) return;
+        if (this.syncRunning || this.unloaded) {
+            return;
+        }
         this.syncRunning = true;
         try {
             this.log.info("[Force sync] Starting periodic forced synchronisation (heals out-of-sync states)...");
@@ -974,23 +1260,42 @@ class MqttPlus extends utils.Adapter {
             // 1. IOB -> MQTT (für 'out' und 'both' - IOB ist die Quelle der Wahrheit für Aktoren)
             const outIds = [...this.sourceToMappings.keys()];
             const outStates = outIds.length ? await this.getForeignStatesAsync(outIds) : {};
-            const outTargetStates = await this.getTargetStates(outIds.flatMap(id => this.sourceToMappings.get(id)!.map(e => e.fullTargetPath!)));
+            const outTargetStates = await this.getTargetStates(
+                outIds.flatMap(id => this.sourceToMappings.get(id)!.map(e => e.fullTargetPath!)),
+            );
             for (const [id, entries] of this.sourceToMappings) {
                 const state = outStates[id];
-                if (!state) continue;
+                if (!state) {
+                    continue;
+                }
                 for (const entry of entries) {
                     if (entry.fullTargetPath && (entry.dir === "out" || entry.dir === "both")) {
-                        if (!this.passesAckFilter(entry, state)) continue;
+                        if (!this.passesAckFilter(entry, state)) {
+                            continue;
+                        }
                         const label = entry.dir === "both" ? "IOB -> MQTT (FORCE: both)" : "IOB -> MQTT (FORCE)";
-                        const written = await this.syncValue(id, entry.fullTargetPath, label, "FORCE-SYNC", entry.type, state,
-                            this.syncOptionsFor(entry, "force", outTargetStates[entry.fullTargetPath]));
+                        const written = await this.syncValue(
+                            id,
+                            entry.fullTargetPath,
+                            label,
+                            "FORCE-SYNC",
+                            entry.type,
+                            state,
+                            this.syncOptionsFor(entry, "force", outTargetStates[entry.fullTargetPath]),
+                        );
                         if (written) {
-                            if (entry.syncMode === "force") forced++; else healed++;
+                            if (entry.syncMode === "force") {
+                                forced++;
+                            } else {
+                                healed++;
+                            }
                             await this.sleep(75);
                         }
                     }
                 }
-                if (this.unloaded) return;
+                if (this.unloaded) {
+                    return;
+                }
             }
 
             // 2. MQTT -> IOB (für 'in' - MQTT ist die Quelle der Wahrheit für externe Sensoren)
@@ -999,25 +1304,44 @@ class MqttPlus extends utils.Adapter {
             // Wandschalter ausgeschaltetes Licht von selbst wieder einschalten.
             const inIds: string[] = [];
             for (const [commandPath, entries] of this.targetToMappings) {
-                if (entries.some(e => e.dir === "in" && e.topicMode !== "dual")) inIds.push(commandPath);
+                if (entries.some(e => e.dir === "in" && e.topicMode !== "dual")) {
+                    inIds.push(commandPath);
+                }
             }
             const inStates = inIds.length ? await this.getForeignStatesAsync(inIds) : {};
-            const inTargetStates = await this.getTargetStates(inIds.flatMap(p => this.targetToMappings.get(p)!.map(e => e.id)));
+            const inTargetStates = await this.getTargetStates(
+                inIds.flatMap(p => this.targetToMappings.get(p)!.map(e => e.id)),
+            );
             for (const [commandPath, entries] of this.targetToMappings) {
                 const state = inStates[commandPath];
                 // Wie im Event-Pfad nur echte Broker-Werte (ack=true) übernehmen.
-                if (!state || state.ack !== true) continue;
+                if (!state || state.ack !== true) {
+                    continue;
+                }
                 for (const entry of entries) {
                     if (entry.dir === "in" && entry.topicMode !== "dual") {
-                        const written = await this.syncValue(commandPath, entry.id, "MQTT -> IOB (FORCE: in)", "FORCE-SYNC", entry.type, state,
-                            this.syncOptionsFor(entry, "force", inTargetStates[entry.id]));
+                        const written = await this.syncValue(
+                            commandPath,
+                            entry.id,
+                            "MQTT -> IOB (FORCE: in)",
+                            "FORCE-SYNC",
+                            entry.type,
+                            state,
+                            this.syncOptionsFor(entry, "force", inTargetStates[entry.id]),
+                        );
                         if (written) {
-                            if (entry.syncMode === "force") forced++; else healed++;
+                            if (entry.syncMode === "force") {
+                                forced++;
+                            } else {
+                                healed++;
+                            }
                             await this.sleep(75);
                         }
                     }
                 }
-                if (this.unloaded) return;
+                if (this.unloaded) {
+                    return;
+                }
             }
 
             const forcedInfo = forced ? `, ${forced} rewritten in mode "Force"` : "";
@@ -1030,13 +1354,15 @@ class MqttPlus extends utils.Adapter {
         }
     }
 
-    private async generateJsonTree(): Promise<Record<string, any>> {
+    private generateJsonTree(): Record<string, any> {
         const mappings = this.config.mappings || [];
         const tree: Record<string, any> = {};
         const basePath = this.getValidatedBasePath();
 
         for (const entry of mappings) {
-            if (!entry.mqttName) continue;
+            if (!entry.mqttName) {
+                continue;
+            }
 
             const cleanSuffix = this.convertMqttPathToIobrokerId(entry.mqttName);
             const pathParts = cleanSuffix.split(".");
@@ -1048,7 +1374,9 @@ class MqttPlus extends utils.Adapter {
 
                 if (isLast) {
                     if (current[part] && typeof current[part] === "object" && !current[part].full_topic) {
-                        this.log.warn(`[JSON tree] Topic prefix collision: "${cleanSuffix}" overwrites an existing substructure.`);
+                        this.log.warn(
+                            `[JSON tree] Topic prefix collision: "${cleanSuffix}" overwrites an existing substructure.`,
+                        );
                     }
                     const statePath = `${basePath}${cleanSuffix}`;
                     const commandPath = this.resolveCommandPath(entry, statePath);
@@ -1060,11 +1388,13 @@ class MqttPlus extends utils.Adapter {
                         topic_mode: entry.topicMode === "dual" ? "dual" : "single",
                         iobroker_id: entry.id,
                         type: this.sourceTypeCache.get(entry.id) || "unknown",
-                        unit: entry.unit || ""
+                        unit: entry.unit || "",
                     };
                 } else {
                     if (current[part] && current[part].full_topic) {
-                        this.log.warn(`[JSON tree] Topic prefix collision: "${cleanSuffix}" collides with the existing topic "${current[part].full_topic}".`);
+                        this.log.warn(
+                            `[JSON tree] Topic prefix collision: "${cleanSuffix}" collides with the existing topic "${current[part].full_topic}".`,
+                        );
                         current[part] = {};
                     } else if (!current[part]) {
                         current[part] = {};
@@ -1078,7 +1408,9 @@ class MqttPlus extends utils.Adapter {
 
     private chunkArray<T>(arr: T[], size: number): T[][] {
         const out: T[][] = [];
-        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        for (let i = 0; i < arr.length; i += size) {
+            out.push(arr.slice(i, i + size));
+        }
         return out;
     }
 
@@ -1094,13 +1426,20 @@ class MqttPlus extends utils.Adapter {
             "DEPTH_ZERO_SELF_SIGNED_CERT",
             "SELF_SIGNED_CERT_IN_CHAIN",
             "ERR_TLS_CERT_ALTNAME_INVALID",
-            "CERT_HAS_EXPIRED"
+            "CERT_HAS_EXPIRED",
         ];
-        if (e.code && nonRetryableCodes.includes(e.code)) return false;
+        if (e.code && nonRetryableCodes.includes(e.code)) {
+            return false;
+        }
         return true;
     }
 
-    private async postWithRetry(url: string, data: any, httpsAgent: https.Agent | undefined, retries = 2): Promise<void> {
+    private async postWithRetry(
+        url: string,
+        data: any,
+        httpsAgent: https.Agent | undefined,
+        retries = 2,
+    ): Promise<void> {
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
                 await axios.post(url, data, {
@@ -1111,12 +1450,14 @@ class MqttPlus extends utils.Adapter {
                     proxy: false,
                     headers: {
                         "Content-Type": "application/json",
-                        "User-Agent": `ioBroker.mqtt-plus/${ADAPTER_VERSION}`
-                    }
+                        "User-Agent": `ioBroker.mqtt-plus/${ADAPTER_VERSION}`,
+                    },
                 });
                 return;
             } catch (e: any) {
-                if (attempt === retries || !this.isRetryableError(e)) throw e;
+                if (attempt === retries || !this.isRetryableError(e)) {
+                    throw e;
+                }
                 await this.sleep(500 * Math.pow(2, attempt));
             }
         }
@@ -1141,12 +1482,11 @@ class MqttPlus extends utils.Adapter {
         return pem;
     }
 
-
-    private async runRemoteSync(verbose: boolean = false): Promise<{success: boolean, message: string}> {
+    private async runRemoteSync(verbose: boolean = false): Promise<{ success: boolean; message: string }> {
         if (!this.config.syncUrl) {
-             const msg = "No sync URL configured";
-             await this.setStateAsync("info.lastSyncStatus", msg, true);
-             return { success: false, message: msg };
+            const msg = "No sync URL configured";
+            await this.setStateAsync("info.lastSyncStatus", msg, true);
+            return { success: false, message: msg };
         }
 
         let parsedUrl: URL;
@@ -1163,14 +1503,16 @@ class MqttPlus extends utils.Adapter {
         let templateStr = this.getDefaultSyncTemplate();
         try {
             const tplState = await this.getStateAsync("config.syncTemplate");
-            if (tplState && tplState.val) templateStr = tplState.val as string;
+            if (tplState && tplState.val) {
+                templateStr = tplState.val as string;
+            }
         } catch (e: any) {
             this.log.debug(`[Remote Sync] Template state not readable, using default: ${e.message}`);
         }
 
         // Platzhalter, die roh in einen JSON-String eingesetzt werden, müssen JSON-escaped werden -
         // sonst bricht ein Anführungszeichen/Backslash in einer ID das gesamte JSON.
-        const esc = (s: string) => JSON.stringify(String(s)).slice(1, -1);
+        const esc = (s: string): string => JSON.stringify(String(s)).slice(1, -1);
 
         const mappings = this.config.mappings || [];
         const payload: any[] = [];
@@ -1186,7 +1528,7 @@ class MqttPlus extends utils.Adapter {
                     }
                     // Funktions-Ersetzer statt String: ein "$" im Wert würde sonst als
                     // Ersetzungsmuster ($&, $1 ...) interpretiert.
-                    let itemStr = templateStr
+                    const itemStr = templateStr
                         .replace(/%ID%/g, () => esc(entry.id))
                         .replace(/%MQTT%/g, () => esc(entry.mqttName))
                         .replace(/%PREFIX%/g, () => esc(this.config.targetBasePath))
@@ -1201,7 +1543,7 @@ class MqttPlus extends utils.Adapter {
                     try {
                         payload.push(JSON.parse(itemStr));
                     } catch {
-                         this.log.warn(`Remote sync template error for ${entry.id}`);
+                        this.log.warn(`Remote sync template error for ${entry.id}`);
                     }
                 }
             } catch (e: any) {
@@ -1233,7 +1575,9 @@ class MqttPlus extends utils.Adapter {
                         const headCodes = [...trimmed.slice(0, 12)].map(c => c.charCodeAt(0)).join(",");
                         fingerprintInfo = `Certificate could not be parsed even after normalisation: ${certErr.message} | first 12 char codes: ${headCodes} (expected for "-----BEGIN": 45,45,45,45,45,66,69,71,73,78,32,67)`;
                     }
-                    this.log.info(`[Remote Sync] Custom CA loaded (${normalizedCaCert.trim().length} characters). ${fingerprintInfo}`);
+                    this.log.info(
+                        `[Remote Sync] Custom CA loaded (${normalizedCaCert.trim().length} characters). ${fingerprintInfo}`,
+                    );
                 }
             } catch (e: any) {
                 const msg = `Invalid CA certificate in the settings: ${e.message}`;
@@ -1273,7 +1617,10 @@ class MqttPlus extends utils.Adapter {
             // Bei Chunking zeigt der Teilerfolg, ob nur ein Bruchteil oder praktisch nichts
             // angekommen ist - relevant, weil ein einzelner gescheiterter Chunk sonst wie ein
             // Totalausfall aussieht, obwohl der Großteil der Werte bereits übertragen wurde.
-            const progress = payload.length > MqttPlus.REMOTE_SYNC_CHUNK_SIZE ? ` (${sentCount}/${payload.length} values transmitted)` : "";
+            const progress =
+                payload.length > MqttPlus.REMOTE_SYNC_CHUNK_SIZE
+                    ? ` (${sentCount}/${payload.length} values transmitted)`
+                    : "";
             const fullMsg = `Error${progress}: ${errorMsg} (${new Date().toLocaleTimeString()})`;
 
             this.log.error(`Remote Sync Error: ${fullMsg} | URL: ${encodedUrl}`);
@@ -1301,14 +1648,18 @@ class MqttPlus extends utils.Adapter {
     // Zusätzlich: Brute-Force-Sperre nach zu vielen Fehlversuchen pro Client-IP.
     private checkAuth(req: http.IncomingMessage): boolean {
         const password = this.config.dashboardPassword;
-        if (!password) return true;
+        if (!password) {
+            return true;
+        }
 
         const ip = req.socket.remoteAddress || "unknown";
         const entry = this.failedAuthAttempts.get(ip);
-        if (entry && entry.lockedUntil > Date.now()) return false;
+        if (entry && entry.lockedUntil > Date.now()) {
+            return false;
+        }
 
         const user = this.config.dashboardUser || "admin";
-        const header = req.headers["authorization"];
+        const header = req.headers.authorization;
         let ok = false;
 
         if (header && header.startsWith("Basic ")) {
@@ -1346,9 +1697,13 @@ class MqttPlus extends utils.Adapter {
     // kein Browser) wird nicht blockiert - dort besteht kein CSRF-Risiko über den Browser.
     private isSameOrigin(req: http.IncomingMessage): boolean {
         const host = req.headers.host;
-        if (!host) return false;
-        const check = (req.headers.origin || req.headers.referer) as string | undefined;
-        if (!check) return true;
+        if (!host) {
+            return false;
+        }
+        const check = req.headers.origin || req.headers.referer;
+        if (!check) {
+            return true;
+        }
         try {
             return new URL(check).host === host;
         } catch {
@@ -1359,14 +1714,20 @@ class MqttPlus extends utils.Adapter {
     // Liest den Request-Body byte-genau ein (Buffer statt String-Konkatenation, damit ein über
     // zwei Chunks gesplittetes Multibyte-Zeichen nicht zu korruptem JSON führt), bricht mit 413
     // ab, sobald maxBytes überschritten wird, und hängt bei Verbindungsabbruch/Timeout nicht.
-    private readBodyLimited(req: http.IncomingMessage, res: http.ServerResponse, maxBytes: number): Promise<string | null> {
+    private readBodyLimited(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        maxBytes: number,
+    ): Promise<string | null> {
         return new Promise(resolve => {
             const chunks: Buffer[] = [];
             let size = 0;
             let settled = false;
 
-            const finish = (result: string | null) => {
-                if (settled) return;
+            const finish = (result: string | null): void => {
+                if (settled) {
+                    return;
+                }
                 settled = true;
                 resolve(result);
             };
@@ -1381,7 +1742,9 @@ class MqttPlus extends utils.Adapter {
             });
 
             req.on("data", (chunk: Buffer) => {
-                if (settled) return;
+                if (settled) {
+                    return;
+                }
                 size += chunk.length;
                 if (size > maxBytes) {
                     res.writeHead(413, { "Content-Type": "application/json" });
@@ -1396,7 +1759,9 @@ class MqttPlus extends utils.Adapter {
             req.on("error", () => finish(null));
 
             req.on("end", () => {
-                if (!settled) finish(Buffer.concat(chunks).toString("utf8"));
+                if (!settled) {
+                    finish(Buffer.concat(chunks).toString("utf8"));
+                }
             });
         });
     }
@@ -1436,31 +1801,30 @@ class MqttPlus extends utils.Adapter {
                     if (pathname === "/" || pathname === "/index.html") {
                         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                         res.end(this.getDashboardHtml());
-                    }
-                    else if (pathname === "/api/json") {
-                        const tree = await this.generateJsonTree();
+                    } else if (pathname === "/api/json") {
+                        const tree = this.generateJsonTree();
                         const exportData = {
                             prefix: this.config.targetBasePath,
                             mappings: this.config.mappings || [],
-                            structure: tree
+                            structure: tree,
                         };
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(exportData, null, 2));
-                    }
-                    else if (pathname === "/api/status") {
+                    } else if (pathname === "/api/status") {
                         const syncTemplateState = await this.getStateAsync("config.syncTemplate");
                         const status = {
                             watchdog: this.currentWatchdogStatus,
                             uptime: process.uptime(),
                             mappings: this.config.mappings ? this.config.mappings.length : 0,
-                            syncTemplate: syncTemplateState ? syncTemplateState.val : this.getDefaultSyncTemplate()
+                            syncTemplate: syncTemplateState ? syncTemplateState.val : this.getDefaultSyncTemplate(),
                         };
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(status));
-                    }
-                    else if (pathname === "/api/save-template" && req.method === "POST") {
+                    } else if (pathname === "/api/save-template" && req.method === "POST") {
                         const body = await this.readBodyLimited(req, res, MqttPlus.MAX_BODY_BYTES);
-                        if (body === null) return; // Fehlerantwort wurde bereits gesendet
+                        if (body === null) {
+                            return;
+                        } // Fehlerantwort wurde bereits gesendet
                         try {
                             const data = JSON.parse(body);
                             if (data.template) {
@@ -1475,10 +1839,11 @@ class MqttPlus extends utils.Adapter {
                             res.writeHead(500, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ success: false, error: e.message }));
                         }
-                    }
-                    else if (pathname === "/api/upload-backup" && req.method === "POST") {
+                    } else if (pathname === "/api/upload-backup" && req.method === "POST") {
                         const body = await this.readBodyLimited(req, res, MqttPlus.MAX_BODY_BYTES);
-                        if (body === null) return; // Fehlerantwort wurde bereits gesendet
+                        if (body === null) {
+                            return;
+                        } // Fehlerantwort wurde bereits gesendet
                         try {
                             const uploaded = JSON.parse(body);
                             if (uploaded && Array.isArray(uploaded.mappings)) {
@@ -1492,7 +1857,12 @@ class MqttPlus extends utils.Adapter {
                                     }
                                     await this.setForeignObjectAsync(`system.adapter.${this.namespace}`, adapterObj);
                                     res.writeHead(200, { "Content-Type": "application/json" });
-                                    res.end(JSON.stringify({ success: true, message: "Configuration restored. Adapter restarts..." }));
+                                    res.end(
+                                        JSON.stringify({
+                                            success: true,
+                                            message: "Configuration restored. Adapter restarts...",
+                                        }),
+                                    );
                                 } else {
                                     throw new Error("Adapter object not found!");
                                 }
@@ -1504,8 +1874,7 @@ class MqttPlus extends utils.Adapter {
                             res.writeHead(500, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ success: false, error: e.message }));
                         }
-                    }
-                    else {
+                    } else {
                         res.writeHead(404);
                         res.end("Not found");
                     }
@@ -1538,7 +1907,7 @@ class MqttPlus extends utils.Adapter {
                 this.httpServer = http.createServer(requestListener);
             }
 
-            this.httpServer.on("connection", (socket) => {
+            this.httpServer.on("connection", socket => {
                 this.activeSockets.add(socket);
                 socket.on("close", () => this.activeSockets.delete(socket));
             });
@@ -1547,24 +1916,28 @@ class MqttPlus extends utils.Adapter {
             // Bei einem Update/Neustart hält der alte Prozess den Port oft noch einige Sekunden.
             // Deshalb erst mehrfach neu versuchen, statt sofort (und dauerhaft) aufzugeben.
             let listenAttempts = 0;
-            const tryListen = () => {
+            const tryListen = (): void => {
                 listenAttempts++;
                 this.httpServer!.listen(port, bindHost);
             };
             this.httpServer.on("listening", () => {
                 this.log.info(`Dashboard web server running on ${usesTls ? "https" : "http"}://${bindHost}:${port}`);
-                this.setState("info.connection", true, true);
+                void this.setState("info.connection", true, true);
             });
             this.httpServer.on("error", (e: any) => {
                 if (e.code === "EADDRINUSE" && listenAttempts < MqttPlus.LISTEN_ATTEMPTS && !this.unloaded) {
-                    this.log.warn(`Port ${port} is still in use - retry ${listenAttempts + 1}/${MqttPlus.LISTEN_ATTEMPTS} in ${MqttPlus.LISTEN_RETRY_MS / 1000} s.`);
+                    this.log.warn(
+                        `Port ${port} is still in use - retry ${listenAttempts + 1}/${MqttPlus.LISTEN_ATTEMPTS} in ${MqttPlus.LISTEN_RETRY_MS / 1000} s.`,
+                    );
                     this.setTimeout(tryListen, MqttPlus.LISTEN_RETRY_MS);
                     return;
                 }
                 this.log.error(`Web server error: ${e.message}`);
-                this.setState("info.connection", false, true);
+                void this.setState("info.connection", false, true);
                 if (e.code === "EADDRINUSE") {
-                    this.log.error(`Port ${port} is permanently in use - stopping the adapter so it does not keep running "green" without dashboard.`);
+                    this.log.error(
+                        `Port ${port} is permanently in use - stopping the adapter so it does not keep running "green" without dashboard.`,
+                    );
                     // terminate() statt eines harten Prozess-Endes: beendet im Compact Mode nur
                     // diese Instanz, nicht den gesamten Host-Prozess.
                     this.terminate("EADDRINUSE", utils.EXIT_CODES.ADAPTER_REQUESTED_TERMINATION);
@@ -1573,7 +1946,7 @@ class MqttPlus extends utils.Adapter {
             tryListen();
         } catch (e: any) {
             this.log.error(`Could not start web server: ${e.message}`);
-            this.setState("info.connection", false, true);
+            void this.setState("info.connection", false, true);
         }
     }
 
@@ -1760,21 +2133,23 @@ class MqttPlus extends utils.Adapter {
         const now = Date.now();
 
         if (isCycleEnd) {
-            this.setState("info.lastCycle", now, true);
+            void this.setState("info.lastCycle", now, true);
         }
 
         const changed = status !== this.lastWatchdogStatus;
-        if (!changed && now - this.lastWatchdogWriteTs < 30000) return;
+        if (!changed && now - this.lastWatchdogWriteTs < 30000) {
+            return;
+        }
 
         this.lastWatchdogStatus = status;
         this.lastWatchdogWriteTs = now;
         this.currentWatchdogStatus = `${status} (${new Date().toLocaleTimeString()})`;
-        this.setState("watchdog", this.currentWatchdogStatus, true);
+        void this.setState("watchdog", this.currentWatchdogStatus, true);
         // Maschinenlesbare Variante zusätzlich zum lokalisierten Text-State: reiner Status-String
         // plus Unix-Timestamp statt serverlokalem toLocaleTimeString().
-        this.setState("info.status", status, true);
+        void this.setState("info.status", status, true);
         if (!isCycleEnd) {
-            this.setState("info.lastCycle", now, true);
+            void this.setState("info.lastCycle", now, true);
         }
     }
 
@@ -1782,11 +2157,15 @@ class MqttPlus extends utils.Adapter {
         this.unloaded = true;
         try {
             [this.updateInterval, this.forceSyncInterval, this.syncInterval].forEach(i => {
-                if (i) this.clearInterval(i);
+                if (i) {
+                    this.clearInterval(i);
+                }
             });
 
             if (this.httpServer) {
-                for (const socket of this.activeSockets) socket.destroy();
+                for (const socket of this.activeSockets) {
+                    socket.destroy();
+                }
                 this.activeSockets.clear();
                 await new Promise<void>(resolve => this.httpServer!.close(() => resolve()));
             }

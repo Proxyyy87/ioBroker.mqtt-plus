@@ -1,0 +1,5 @@
+# Einheitlich LF-Zeilenenden (von Prettier/ESLint verlangt), auch beim Auschecken unter Windows
+* text=auto eol=lf
+*.png binary
+*.tgz binary
+*.rar binary

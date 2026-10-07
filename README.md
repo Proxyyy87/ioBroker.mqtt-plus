@@ -65,6 +65,12 @@ The adapter is currently in the review process for the official ioBroker reposit
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+* (proxy) Code base checked with the shared ioBroker ESLint/Prettier configuration; TypeScript configuration
+  based on `@tsconfig/node22`
+* (proxy) Development tooling: release script, `@iobroker/adapter-dev` for translations, Dependabot, VS Code schemas;
+  older changelog entries moved to `CHANGELOG_OLD.md`
+
 ### 1.6.5 (2026-09-28)
 * (proxy) Admin settings translated into all supported languages (i18n files, compatible with Weblate)
 * (proxy) Log messages, dashboard and object names in English
