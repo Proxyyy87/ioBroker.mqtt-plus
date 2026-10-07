@@ -3,22 +3,28 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: monthly
-      day: 15
-      time: "00:05"
+      # individual time to spread the load (instead of "monthly")
+      interval: cron
+      cronjob: "41 3 9 * *"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    # new releases must be at least 7 days old before an update is proposed (supply chain protection)
+    cooldown:
+      default: 7
+    open-pull-requests-limit: 15
     assignees:
       - Proxyyy87
     versioning-strategy: increase
+    ignore:
+      # @types/node must match the minimum supported Node.js version, not the newest one
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: monthly
-      day: 15
-      time: "00:05"
+      interval: cron
+      cronjob: "53 3 9 * *"
       timezone: Europe/Berlin
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 15
     assignees:
       - Proxyyy87
