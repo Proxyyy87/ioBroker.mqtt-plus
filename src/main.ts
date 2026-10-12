@@ -143,6 +143,11 @@ class MqttPlus extends utils.Adapter {
     ]);
     // Kennzeichnet die von mqtt-plus angelegten Ziel-States (common.name) - nur diese werden korrigiert.
     private static readonly TARGET_NAME_PREFIX = "Export of ";
+    // Bis 1.6.4 verwendeter (deutscher) Name der Ziel-States - wird beim Start auf TARGET_NAME_PREFIX umgestellt.
+    private static readonly LEGACY_TARGET_NAME_PREFIX = "Export von ";
+    // Eigene Objekte älterer Versionen (bis 1.2.x als instanceObjects angelegt), die js-controller beim
+    // Update nicht entfernt. "triggerExport" hatte zudem die Rolle "button" mit read=true.
+    private static readonly OBSOLETE_OBJECTS = ["triggerExport"];
 
     // Map statt Plain Object: verhindert Prototype Pollution über Datenpunkt-/Topic-Namen wie "__proto__"
     private lastSyncValues: Map<string, any> = new Map();
@@ -550,6 +555,12 @@ class MqttPlus extends utils.Adapter {
                       } as ioBroker.SettableObject)
                     : obj;
             await this.extendObject(id, def);
+        }
+        for (const id of MqttPlus.OBSOLETE_OBJECTS) {
+            if (await this.getObjectAsync(id)) {
+                await this.delObjectAsync(id);
+                this.log.info(`[Setup] Obsolete object ${this.namespace}.${id} from an older version removed.`);
+            }
         }
     }
 
@@ -1273,6 +1284,11 @@ class MqttPlus extends utils.Adapter {
                     const num = typeof value === "number" ? value : parseFloat(value);
                     return isNaN(num) ? value : num;
                 }
+                // Ziel vom Typ "string" (z.B. vom MQTT-Adapter beim ersten Empfang angelegt): Zahl/Boolean
+                // als Text schreiben, sonst meldet js-controller einen Typkonflikt.
+                if (knownType === "string" && (typeof value === "number" || typeof value === "boolean")) {
+                    return String(value);
+                }
                 return value;
             }
         }
@@ -1370,11 +1386,19 @@ class MqttPlus extends utils.Adapter {
                 const type = finalExists.common.type || "mixed";
                 this.targetTypeCache.set(targetPath, type);
                 // Bis 1.6.5 angelegte Ziele konnten eine Rolle tragen, die nicht zu read/write passt
-                // ("variable" oder z.B. value.* von der Quelle). Nur selbst angelegte Objekte korrigieren.
-                const role = this.toReadWriteRole(finalExists.common.role, type);
-                if (finalExists.common.name === ownName && role !== finalExists.common.role) {
-                    await this.extendForeignObjectAsync(targetPath, { common: { role } });
-                    this.log.info(`[Setup] Role of ${targetPath} corrected: "${finalExists.common.role}" -> "${role}"`);
+                // ("variable" oder z.B. value.* von der Quelle), bis 1.6.4 zudem den deutschen Namen
+                // "Export von ...". Nur selbst angelegte Objekte korrigieren - fremde (z.B. vom
+                // MQTT-Adapter beim Empfang eines Topics angelegte) bleiben unverändert.
+                const name = finalExists.common.name;
+                const legacyName = name === `${MqttPlus.LEGACY_TARGET_NAME_PREFIX}${sourceId}`;
+                if (name === ownName || legacyName) {
+                    const role = this.toReadWriteRole(finalExists.common.role, type);
+                    if (role !== finalExists.common.role || legacyName) {
+                        await this.extendForeignObjectAsync(targetPath, { common: { name: ownName, role } });
+                        this.log.info(
+                            `[Setup] Target object ${targetPath} corrected: role "${finalExists.common.role}" -> "${role}"${legacyName ? ", name in English" : ""}`,
+                        );
+                    }
                 }
             }
         } catch (e: any) {

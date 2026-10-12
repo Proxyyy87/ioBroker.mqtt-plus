@@ -33,4 +33,4 @@ Thumbs.db
 .commitinfo
 
 # Objekt-Export fuer das ioBroker-Review (wird im PR angehaengt, nicht versioniert)
-mqtt-plus.0.json
+*mqtt-plus.0*.json

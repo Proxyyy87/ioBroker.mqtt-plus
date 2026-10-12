@@ -261,7 +261,9 @@ configured target prefix (default `mqtt.0.`):
   (`switch`, `level.*`, `text`, `json`, `html`, `url`, `date`, with a matching type). Read-only
   roles (`value.*`, `indicator.*`, `sensor.*`, …) and write-only roles (`button`) become the
   generic role `state`. Target states created by older versions with such a role (or the former
-  role `variable`) are corrected on start — only states named `Export of …`.
+  role `variable`) are corrected on start — only states named `Export of …` or, up to version
+  1.6.4, `Export von …` (renamed to `Export of …`). States created by the MQTT adapter itself are
+  not changed; if such a state has the type `string`, numbers and booleans are written as text.
 * If the target path contains `Switch`, the state is created as `boolean` with the role `switch`.
 * In topic mode `Dual` the command topic `<topic>/set` is a sub-topic of the state topic. As the MQTT
   adapter maps topics 1:1 to object IDs, the command state `<prefix>.<topic>.set` lies below the

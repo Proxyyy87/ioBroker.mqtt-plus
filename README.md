@@ -89,6 +89,13 @@ The adapter is currently in the review process for the official ioBroker reposit
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+* (proxy) Target states created by versions up to 1.6.4 (name `Export von …`) are now also recognised: their role is
+  corrected and the name is changed to `Export of …`
+* (proxy) The obsolete object `triggerExport` from versions up to 1.2.x is removed on start
+* (proxy) Targets of type `string` (e.g. created by the MQTT adapter on first receipt of a topic) receive numbers and
+  booleans as text - no more type warning from js-controller
+
 ### 1.6.6 (2026-10-12)
 * (proxy) Adapter icon is now a real PNG file (was a JPEG with `.png` extension)
 * (proxy) Created MQTT target states use the role `state` instead of the invalid role `variable`; the role of

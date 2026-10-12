@@ -272,7 +272,9 @@ unterhalb des konfigurierten Ziel-Präfix (Standard `mqtt.0.`):
   passendem Typ). Nur-Lese-Rollen (`value.*`, `indicator.*`, `sensor.*`, …) und Nur-Schreib-Rollen
   (`button`) werden zur generischen Rolle `state`. Von älteren Versionen mit einer solchen Rolle
   (oder der früheren Rolle `variable`) angelegte Ziel-States werden beim Start korrigiert — nur
-  States mit dem Namen `Export of …`.
+  States mit dem Namen `Export of …` bzw. bis Version 1.6.4 `Export von …` (wird in `Export of …`
+  umbenannt). Vom MQTT-Adapter selbst angelegte States bleiben unverändert; hat ein solcher State
+  den Typ `string`, werden Zahlen und Booleans als Text geschrieben.
 * Enthält der Zielpfad `Switch`, wird der State als `boolean` mit der Rolle `switch` angelegt.
 * Im Topic-Modus `Dual` ist das Befehls-Topic `<topic>/set` ein Unter-Topic des Status-Topics. Da
   der MQTT-Adapter Topics 1:1 auf Objekt-IDs abbildet, liegt der Befehls-State
