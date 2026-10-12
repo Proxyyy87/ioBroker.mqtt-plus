@@ -89,7 +89,7 @@ The adapter is currently in the review process for the official ioBroker reposit
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 1.6.7 (2026-10-12)
 * (proxy) Target states created by versions up to 1.6.4 (name `Export von …`) are now also recognised: their role is
   corrected and the name is changed to `Export of …`
 * (proxy) The obsolete object `triggerExport` from versions up to 1.2.x is removed on start

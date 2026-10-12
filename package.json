@@ -1,6 +1,6 @@
 {
   "name": "iobroker.mqtt-plus",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "description": "Bridge between ioBroker states and MQTT with JSON export and Remote Sync",
   "author": "proxy <proxy@ich.ms>",
   "license": "MIT",

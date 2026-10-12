@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "mqtt-plus",
-    "version": "1.6.6",
+    "version": "1.6.7",
     "news": {
+      "1.6.7": {
+        "en": "Target states created by versions up to 1.6.4 ('Export von ...') are recognised and corrected (role, English name); the obsolete object triggerExport is removed; targets of type string receive numbers and booleans as text",
+        "de": "Ziel-States aus Versionen bis 1.6.4 ('Export von ...') werden erkannt und korrigiert (Rolle, englischer Name); das veraltete Objekt triggerExport wird entfernt; Ziele vom Typ string erhalten Zahlen und Booleans als Text",
+        "ru": "Целевые состояния, созданные версиями до 1.6.4 ('Export von ...'), распознаются и исправляются (роль, английское имя); устаревший объект triggerExport удаляется; цели типа string получают числа и логические значения в виде текста",
+        "pt": "Os estados de destino criados por versões até 1.6.4 ('Export von ...') são reconhecidos e corrigidos (função, nome em inglês); o objeto obsoleto triggerExport é removido; destinos do tipo string recebem números e booleanos como texto",
+        "nl": "Doelstates die door versies tot en met 1.6.4 zijn aangemaakt ('Export von ...') worden herkend en gecorrigeerd (rol, Engelse naam); het verouderde object triggerExport wordt verwijderd; doelen van het type string ontvangen getallen en booleans als tekst",
+        "fr": "Les états cibles créés par les versions jusqu'à 1.6.4 ('Export von ...') sont reconnus et corrigés (rôle, nom en anglais) ; l'objet obsolète triggerExport est supprimé ; les cibles de type string reçoivent les nombres et booléens sous forme de texte",
+        "it": "Gli stati di destinazione creati dalle versioni fino alla 1.6.4 ('Export von ...') vengono riconosciuti e corretti (ruolo, nome in inglese); l'oggetto obsoleto triggerExport viene rimosso; le destinazioni di tipo string ricevono numeri e booleani come testo",
+        "es": "Los estados de destino creados por versiones hasta la 1.6.4 ('Export von ...') se reconocen y corrigen (rol, nombre en inglés); se elimina el objeto obsoleto triggerExport; los destinos de tipo string reciben números y booleanos como texto",
+        "pl": "Stany docelowe utworzone przez wersje do 1.6.4 ('Export von ...') są rozpoznawane i poprawiane (rola, angielska nazwa); przestarzały obiekt triggerExport jest usuwany; cele typu string otrzymują liczby i wartości logiczne jako tekst",
+        "uk": "Цільові стани, створені версіями до 1.6.4 ('Export von ...'), розпізнаються та виправляються (роль, англійська назва); застарілий об'єкт triggerExport видаляється; цілі типу string отримують числа та логічні значення як текст",
+        "zh-cn": "可识别并修正 1.6.4 及更早版本创建的目标状态（'Export von ...'）（角色、英文名称）；删除过时的对象 triggerExport；string 类型的目标以文本形式接收数字和布尔值"
+      },
       "1.6.6": {
         "en": "Icon is now a real PNG; created MQTT target states get valid roles ('state' instead of 'variable', no read-only roles), existing ones are corrected; writes to config.syncTemplate are validated and acknowledged; interval settings are limited to the supported range; times in status texts no longer depend on the server locale",
         "de": "Icon ist jetzt ein echtes PNG; angelegte MQTT-Ziel-States erhalten gültige Rollen ('state' statt 'variable', keine Nur-Lese-Rollen), bestehende werden korrigiert; Schreibzugriffe auf config.syncTemplate werden geprüft und bestätigt; Intervall-Einstellungen sind auf den unterstützten Bereich begrenzt; Uhrzeiten in Statustexten hängen nicht mehr von der Server-Locale ab",
