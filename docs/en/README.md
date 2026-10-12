@@ -57,13 +57,13 @@ The configuration is done in the ioBroker admin interface, spread over three tab
   Must end with a dot (default: `mqtt.0.`). If the field is empty, `mqtt.0.` is used.
 * **Update interval (s):** Periodic comparison of the `out`/`both` directions — only writes values
   that actually changed since the last run (no forced writes, that is the job of the force sync).
-  Minimum 5 s, even if a smaller value is entered.
+  Allowed range 5 – 2147483 s; values outside are corrected (with a log warning).
 * **Log transfers:** Writes every synchronised value as an info line into the ioBroker log.
 * **Force sync interval (min, 0 = off):** Bypasses the cache and compares all `out`/`both` values as
   well as all `in` values (mode `Single`) directly with the current value on the target side. It
   only writes where both actually differ and the source is active — to heal states that drifted
   apart, e.g. after a restart. The writes are staggered by 75 ms each so the radio budget
-  (Zigbee/433 MHz) is not hit in a burst.
+  (Zigbee/433 MHz) is not hit in a burst. Allowed range 0 – 35791 min.
 * **Staleness limit (min, 0 = off):** Default `1440` (24 h). Sources whose last update is older or
   that report a quality `q ≠ 0` are not mirrored on start, in the update interval and in the force
   sync. Can be overridden per mapping (field "Staleness").
@@ -115,7 +115,7 @@ The configuration is done in the ioBroker admin interface, spread over three tab
 ### Tab 3: Remote sync
 
 * **Webhook URL:** The complete target URL, including any API key parameters.
-* **Interval (min):** How often data is sent automatically.
+* **Interval (min):** How often data is sent automatically (1 – 35791 min, default 60).
 * **Skip inactive sources:** Values considered inactive according to the staleness limit/quality
   are not sent to the webhook (default: off).
 * **Trusted certificate / CA (PEM, optional):** Only needed for a self-signed/internal certificate
@@ -233,7 +233,8 @@ command, not the device state. If the device was switched elsewhere in the meant
 repeating the previous command must still reach the device.
 
 With `Dual` the adapter creates both objects in the target tree, the base topic first and the
-command topic below it. The JSON structure preview and the backup show both topics
+command topic below it (see [Objects in the MQTT adapter's namespace](#objects-in-the-mqtt-adapters-namespace)
+for why the command state lies below the state object). The JSON structure preview and the backup show both topics
 (`full_topic` and `command_topic`) including the mode.
 
 **Important — commands are never repeated with `Dual`:** A command topic is a command channel, not
@@ -242,6 +243,30 @@ direction MQTT → IOB when `Dual` is set. Otherwise a (possibly retained) comma
 be executed again after every restart or every few minutes — a light switched off at the wall
 switch would turn itself back on. In mode `Single` this comparison stays active because the topic
 there actually holds the state.
+
+### Objects in the MQTT adapter's namespace
+
+`mqtt-plus` deliberately creates and writes objects outside its own namespace, below the
+configured target prefix (default `mqtt.0.`):
+
+* The MQTT adapter publishes a value when one of its own states is written with `ack: false`, and
+  it delivers incoming messages as states in its own namespace. A topic that was never received has
+  no state yet — so `mqtt-plus` creates the state and its parent folders for every mapping in
+  advance.
+* Only the objects of the configured mappings are created. Existing objects are not overwritten,
+  and nothing is deleted there. States created by `mqtt-plus` carry the name
+  `Export of <source ID>`.
+* Created states always have `read: true` and `write: true`: a topic is both published and
+  received. The role of the source object is only taken over if it allows reading and writing
+  (`switch`, `level.*`, `text`, `json`, `html`, `url`, `date`, with a matching type). Read-only
+  roles (`value.*`, `indicator.*`, `sensor.*`, …) and write-only roles (`button`) become the
+  generic role `state`. Target states created by older versions with such a role (or the former
+  role `variable`) are corrected on start — only states named `Export of …`.
+* If the target path contains `Switch`, the state is created as `boolean` with the role `switch`.
+* In topic mode `Dual` the command topic `<topic>/set` is a sub-topic of the state topic. As the MQTT
+  adapter maps topics 1:1 to object IDs, the command state `<prefix>.<topic>.set` lies below the
+  state `<prefix>.<topic>`. The object tree follows the topic tree on the broker; a different
+  object hierarchy would need different topic names and would break existing MQTT clients.
 
 ### Echo protection for `both` mappings
 
@@ -322,6 +347,12 @@ certificate errors and 4xx responses are not (a retry would not change them anyw
 All placeholders except `%VAL%`/`%TS%`/`%LC%`/`%ACK%`/`%Q%` are JSON-escaped automatically when
 inserted — a quote character in an ID no longer breaks the generated JSON.
 
+The template can be edited in the dashboard or written directly to the state
+`config.syncTemplate` (admin, scripts). Before it is used, the adapter checks that the template
+results in valid JSON with sample values. An invalid template is rejected — the dashboard shows the
+error, a direct write is logged and the previous template is restored. Writing an empty value
+restores the default template.
+
 **Default template:**
 ```json
 {
@@ -350,5 +381,5 @@ Besides the configuration tabs, the adapter creates the following status states:
 | `info.lastSyncStatus` | Result of the last remote sync run (success/error text) |
 | `info.dashboardUrl` | Ready-made link to the web dashboard |
 | `info.authLockouts` | Internal: active dashboard login lockouts (survives restarts) |
-| `config.syncTemplate` | Template for the remote sync (editable in the dashboard) |
+| `config.syncTemplate` | Template for the remote sync (editable in the dashboard or directly, validated) |
 | `watchdog` | Free-text status line (historic, for overview in the object tree) |

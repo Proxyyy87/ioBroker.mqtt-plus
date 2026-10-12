@@ -52,6 +52,30 @@ specification are documented at [mqtt.org](https://mqtt.org/getting-started/).
   [ioBroker.mqtt](https://github.com/ioBroker/ioBroker.mqtt)) whose namespace is used as target
   prefix.
 
+### Objects in the namespace of the MQTT adapter
+
+`mqtt-plus` deliberately creates and writes objects **outside its own namespace**, in the namespace
+of the MQTT client adapter that is configured as target prefix (default `mqtt.0.`). This is how the
+bridge works, not a side effect:
+
+* The MQTT adapter publishes a value when one of **its own** states is written with `ack: false`,
+  and it delivers incoming messages as states in its own namespace. A topic that was never received
+  has no state yet that could be written - so `mqtt-plus` creates the state (and the parent
+  folders) for every configured mapping in advance.
+* Only the objects of the configured mappings are created, and only below the configured prefix.
+  Existing objects are not overwritten and nothing is ever deleted there. The states created by
+  `mqtt-plus` are marked with the name `Export of <source ID>`.
+* Every created state has `read: true` and `write: true`, because a topic is both published
+  (written) and received (read). The role of the source object is only taken over if it allows
+  reading and writing (e.g. `switch`, `level.*`, `text`); read-only roles such as `value.*`,
+  `indicator.*`, `sensor.*` and write-only roles such as `button` are replaced by the generic role
+  `state`.
+* In topic mode `dual` the command topic `<topic>/set` is a sub-topic of the state topic `<topic>`
+  (common MQTT convention, e.g. zigbee2mqtt). The MQTT adapter maps topics 1:1 to object IDs, so
+  the command state `<prefix>.<topic>.set` lies below the state `<prefix>.<topic>`. The object tree
+  follows the topic tree on the broker; a different object hierarchy would require different topic
+  names on the broker and would break existing MQTT clients.
+
 ### Configuration
 
 The complete configuration guide (topic mode, echo protection, sync mode, remote sync
@@ -65,7 +89,17 @@ The adapter is currently in the review process for the official ioBroker reposit
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 1.6.6 (2026-10-12)
+* (proxy) Adapter icon is now a real PNG file (was a JPEG with `.png` extension)
+* (proxy) Created MQTT target states use the role `state` instead of the invalid role `variable`; the role of
+  the source is only taken over if it allows reading and writing (no `value.*`, `indicator.*`, `sensor.*`,
+  `button`). Target states created by earlier versions are corrected on start
+* (proxy) Writes to `config.syncTemplate` (admin, scripts) are now processed: the template is validated and
+  acknowledged, an invalid template is rejected and the previous one is restored
+* (proxy) Interval settings are limited to the range supported by the timers, values outside are corrected and logged
+* (proxy) The path heuristic for switch states only checks the English keyword `Switch`
+* (proxy) Times in `watchdog` and `info.lastSyncStatus` no longer depend on the server locale
+* (proxy) README: explanation why objects are created in the namespace of the MQTT adapter
 * (proxy) Code base checked with the shared ioBroker ESLint/Prettier configuration; TypeScript configuration
   based on `@tsconfig/node22`
 * (proxy) Development tooling: release script, `@iobroker/adapter-dev` for translations, Dependabot, VS Code schemas;

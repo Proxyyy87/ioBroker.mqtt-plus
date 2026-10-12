@@ -59,14 +59,15 @@ Die Konfiguration erfolgt über die ioBroker Admin-Oberfläche, verteilt auf dre
   auf `mqtt.0.` zurückgefallen.
 * **Update Intervall (s):** Zyklischer Abgleich der `out`/`both`-Richtungen — schreibt nur
   Werte, die sich seit dem letzten Durchlauf tatsächlich geändert haben (kein Zwangs-Schreiben,
-  das übernimmt der Force-Sync). Minimum 5s, auch wenn ein kleinerer Wert eingetragen wird.
+  das übernimmt der Force-Sync). Erlaubter Bereich 5 – 2147483 s; Werte außerhalb werden (mit
+  Warnung im Log) korrigiert.
 * **Log Aktiv:** Schreibt jeden synchronisierten Wert als Info-Zeile ins ioBroker-Protokoll.
 * **Force-Sync Intervall (Min, 0 = aus):** Ignoriert den Cache und vergleicht alle
   `out`/`both`-Werte sowie alle `in`-Werte (Modus `Single`) direkt mit dem aktuellen Wert auf der
   Zielseite. Geschrieben wird nur, wo beide tatsächlich voneinander abweichen und die Quelle
   aktiv ist — zur Heilung von Zuständen, die z.B. nach einem Neustart auseinandergelaufen sind.
   Die Schreibvorgänge werden einzeln um 75ms gestaffelt, um das Funkbudget (Zigbee/433MHz)
-  nicht als Burst zu belasten.
+  nicht als Burst zu belasten. Erlaubter Bereich 0 – 35791 Min.
 * **Aktualitätsgrenze (Min, 0 = aus):** Standard `1440` (24 h). Quellen, deren letztes Update
   älter ist oder die eine Qualität `q ≠ 0` melden, werden beim Start, im Update-Intervall und
   beim Force-Sync nicht gespiegelt. Pro Mapping überschreibbar (Spalte „Aktualität“).
@@ -120,7 +121,7 @@ Die Konfiguration erfolgt über die ioBroker Admin-Oberfläche, verteilt auf dre
 ### Reiter 3: Remote Sync
 
 * **Webhook URL:** Die vollständige Ziel-URL, inkl. eventueller API-Key-Parameter.
-* **Intervall (Min):** Wie oft automatisch gesendet wird.
+* **Intervall (Min):** Wie oft automatisch gesendet wird (1 – 35791 Min, Standard 60).
 * **Inaktive Quellen weglassen:** Werte, die laut Aktualitätsgrenze/Qualität als inaktiv gelten,
   werden nicht an den Webhook gesendet (Standard: aus).
 * **Vertrauenswürdiges Zertifikat / CA (PEM, optional):** Nur bei selbstsigniertem/internem
@@ -242,7 +243,8 @@ letzten Befehl, nicht den Gerätezustand. Wurde das Gerät zwischendurch anderwe
 (Taster, App), muss auch die Wiederholung des vorherigen Befehls beim Gerät ankommen.
 
 Der Adapter legt bei `Dual` beide Objekte im Zielbaum an, das Basis-Topic zuerst und das
-Befehls-Topic darunter. In der JSON-Struktur-Vorschau und im Backup erscheinen beide Topics
+Befehls-Topic darunter (warum der Befehls-State unter dem State-Objekt liegt, steht unter
+[Objekte im Namespace des MQTT-Adapters](#objekte-im-namespace-des-mqtt-adapters)). In der JSON-Struktur-Vorschau und im Backup erscheinen beide Topics
 (`full_topic` und `command_topic`) samt Modus.
 
 **Wichtig — Befehle werden bei `Dual` nie wiederholt:** Ein Befehls-Topic ist ein Kommando-Kanal,
@@ -251,6 +253,32 @@ auch der Force-Sync die Richtung MQTT → IOB, wenn `Dual` eingestellt ist. Ande
 dort liegender (womöglich retained) Befehl nach jedem Neustart bzw. alle paar Minuten erneut
 ausgeführt — ein am Wandschalter ausgeschaltetes Licht ginge dann von selbst wieder an. Im Modus
 `Single` bleibt dieser Abgleich aktiv, weil das Topic dort tatsächlich den Zustand führt.
+
+### Objekte im Namespace des MQTT-Adapters
+
+`mqtt-plus` legt bewusst Objekte außerhalb des eigenen Namespace an und schreibt dort, nämlich
+unterhalb des konfigurierten Ziel-Präfix (Standard `mqtt.0.`):
+
+* Der MQTT-Adapter veröffentlicht einen Wert, wenn einer seiner eigenen States mit `ack: false`
+  geschrieben wird, und liefert eingehende Nachrichten als States im eigenen Namespace. Für ein
+  Topic, das noch nie empfangen wurde, gibt es noch keinen State — deshalb legt `mqtt-plus` den
+  State samt Elternordnern für jedes Mapping vorab an.
+* Angelegt werden nur die Objekte der konfigurierten Mappings. Bestehende Objekte werden nicht
+  überschrieben, gelöscht wird dort nichts. Von `mqtt-plus` angelegte States tragen den Namen
+  `Export of <Quell-ID>`.
+* Angelegte States haben immer `read: true` und `write: true`: Ein Topic wird sowohl
+  veröffentlicht als auch empfangen. Die Rolle des Quellobjekts wird nur übernommen, wenn sie
+  Lesen und Schreiben erlaubt (`switch`, `level.*`, `text`, `json`, `html`, `url`, `date`, bei
+  passendem Typ). Nur-Lese-Rollen (`value.*`, `indicator.*`, `sensor.*`, …) und Nur-Schreib-Rollen
+  (`button`) werden zur generischen Rolle `state`. Von älteren Versionen mit einer solchen Rolle
+  (oder der früheren Rolle `variable`) angelegte Ziel-States werden beim Start korrigiert — nur
+  States mit dem Namen `Export of …`.
+* Enthält der Zielpfad `Switch`, wird der State als `boolean` mit der Rolle `switch` angelegt.
+* Im Topic-Modus `Dual` ist das Befehls-Topic `<topic>/set` ein Unter-Topic des Status-Topics. Da
+  der MQTT-Adapter Topics 1:1 auf Objekt-IDs abbildet, liegt der Befehls-State
+  `<präfix>.<topic>.set` unter dem State `<präfix>.<topic>`. Der Objektbaum folgt hier dem
+  Topic-Baum beim Broker; eine andere Objekt-Hierarchie würde andere Topic-Namen erfordern und
+  bestehende MQTT-Clients brechen.
 
 ### Echo-Schutz bei `both`-Mappings
 
@@ -333,6 +361,12 @@ dagegen nicht (die ändern sich durch einen Retry ohnehin nicht).
 Alle Platzhalter außer `%VAL%`/`%TS%`/`%LC%`/`%ACK%`/`%Q%` werden beim Einsetzen automatisch JSON-escaped — ein
 Anführungszeichen in einer ID bricht das erzeugte JSON also nicht mehr.
 
+Das Template lässt sich im Dashboard bearbeiten oder direkt in den State `config.syncTemplate`
+schreiben (Admin, Skripte). Vor der Übernahme prüft der Adapter, ob das Template mit
+Beispielwerten gültiges JSON ergibt. Ein ungültiges Template wird abgelehnt — das Dashboard
+zeigt den Fehler, ein direkter Schreibzugriff wird geloggt und das bisherige Template
+wiederhergestellt. Ein leerer Wert stellt das Standard-Template wieder her.
+
 **Standard-Template:**
 ```json
 {
@@ -361,5 +395,5 @@ Neben den Config-Reitern legt der Adapter folgende Status-Datenpunkte an:
 | `info.lastSyncStatus` | Ergebnis des letzten Remote-Sync-Laufs (Erfolg/Fehlertext) |
 | `info.dashboardUrl` | Fertiger Link zum Web-Dashboard |
 | `info.authLockouts` | Intern: aktive Login-Sperren des Dashboards (übersteht Neustarts) |
-| `config.syncTemplate` | Template für den Remote-Sync (im Dashboard bearbeitbar) |
+| `config.syncTemplate` | Template für den Remote-Sync (im Dashboard oder direkt bearbeitbar, wird geprüft) |
 | `watchdog` | Freitext-Statuszeile (historisch, für Übersicht im Objektbaum) |

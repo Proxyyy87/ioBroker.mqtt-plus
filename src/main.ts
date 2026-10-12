@@ -122,6 +122,27 @@ class MqttPlus extends utils.Adapter {
     private static readonly MIGRATION_RESTART_FALLBACK_MS = 30_000;
     // Standard-Aktualitätsgrenze, falls in der Instanz (z.B. nach Update von <1.6.0) nichts gesetzt ist.
     private static readonly DEFAULT_STALE_AFTER_MIN = 1440; // 24 h
+    // Obergrenze für setInterval: größere Werte (> 2^31-1 ms, ca. 24,8 Tage) setzt Node.js auf 1 ms,
+    // der Timer würde dann in Dauerschleife feuern.
+    private static readonly MAX_TIMER_MS = 2_147_483_647;
+    private static readonly MAX_INTERVAL_SEC = Math.floor(MqttPlus.MAX_TIMER_MS / 1000);
+    private static readonly MAX_INTERVAL_MIN = Math.floor(MqttPlus.MAX_TIMER_MS / 60_000);
+    // Rollen (stateroles.md, erste Ebene) samt zulässiger common.type, deren Vorgaben zu
+    // read=true/write=true passen. Die MQTT-Ziel-States müssen beschreibbar sein: mqtt-plus schreibt
+    // sie mit ack=false, damit der MQTT-Adapter den Wert veröffentlicht. Rollen mit write=false
+    // (value.*, indicator.*, sensor.*) oder read=false (button) werden deshalb nicht von der Quelle
+    // übernommen, sondern durch die generische Rolle "state" ersetzt.
+    private static readonly READ_WRITE_ROLES: ReadonlyMap<string, ioBroker.CommonType[]> = new Map([
+        ["switch", ["boolean"]],
+        ["level", ["number", "string"]],
+        ["text", ["string"]],
+        ["html", ["string"]],
+        ["json", ["string"]],
+        ["url", ["string"]],
+        ["date", ["string", "number"]],
+    ]);
+    // Kennzeichnet die von mqtt-plus angelegten Ziel-States (common.name) - nur diese werden korrigiert.
+    private static readonly TARGET_NAME_PREFIX = "Export of ";
 
     // Map statt Plain Object: verhindert Prototype Pollution über Datenpunkt-/Topic-Namen wie "__proto__"
     private lastSyncValues: Map<string, any> = new Map();
@@ -161,6 +182,10 @@ class MqttPlus extends utils.Adapter {
 
     private lastWatchdogStatus = "";
     private lastWatchdogWriteTs = 0;
+
+    // Aktives Remote-Sync-Template (gespiegelt in config.syncTemplate). Wird nur nach erfolgreicher
+    // Prüfung ersetzt - bei einem ungültigen Schreibversuch wird dieser Stand wiederhergestellt.
+    private syncTemplate = "";
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({
@@ -266,6 +291,9 @@ class MqttPlus extends utils.Adapter {
         }
 
         await this.initObjects();
+        await this.loadSyncTemplate();
+        // config.syncTemplate ist beschreibbar: Änderungen über Admin/Skripte werden geprüft und bestätigt.
+        await this.subscribeStatesAsync("config.syncTemplate");
         await this.loadAuthLockouts();
         await this.setStateAsync("info.version", ADAPTER_VERSION, true);
         this.log.info(`[Setup] MQTT bridge manager v${ADAPTER_VERSION} starting...`);
@@ -292,14 +320,26 @@ class MqttPlus extends utils.Adapter {
         await this.updateDashboardUrlState(port);
 
         // 1. Normales Fallback-Intervall (Mit Cache), mindestens 5s gegen Busy-Loop bei Fehlkonfiguration
-        const updateIntervalSec = Math.max(5, this.config.updateIntervalSec || 60);
+        const updateIntervalSec = this.readInterval(
+            "updateIntervalSec",
+            this.config.updateIntervalSec,
+            5,
+            MqttPlus.MAX_INTERVAL_SEC,
+            60,
+        );
         this.log.info(`Starting update interval (fallback): ${updateIntervalSec} seconds`);
         this.updateInterval = this.setInterval(() => {
             this.runCycleSync().catch(e => this.log.error(`Cycle sync error: ${e.message}`));
         }, updateIntervalSec * 1000);
 
-        // 2. Force-Sync Intervall (ohne Cache zur System-Heilung), konfigurierbar/abschaltbar
-        const forceSyncMin = this.config.forceSyncIntervalMin ?? 5;
+        // 2. Force-Sync Intervall (ohne Cache zur System-Heilung), konfigurierbar/abschaltbar (0 = aus)
+        const forceSyncMin = this.readInterval(
+            "forceSyncIntervalMin",
+            this.config.forceSyncIntervalMin,
+            0,
+            MqttPlus.MAX_INTERVAL_MIN,
+            5,
+        );
         if (forceSyncMin > 0) {
             this.log.info(`Starting force sync interval: every ${forceSyncMin} minutes (heals out-of-sync states)`);
             this.forceSyncInterval = this.setInterval(
@@ -314,7 +354,13 @@ class MqttPlus extends utils.Adapter {
 
         // 3. Remote Sync
         if (this.config.syncUrl) {
-            const syncIntervalMin = this.config.syncIntervalMin || 60;
+            const syncIntervalMin = this.readInterval(
+                "syncIntervalMin",
+                this.config.syncIntervalMin,
+                1,
+                MqttPlus.MAX_INTERVAL_MIN,
+                60,
+            );
             this.log.info(`Starting remote sync: every ${syncIntervalMin} minutes`);
             this.runRemoteSync(false).catch(e => this.log.error(`Remote sync error: ${e.message}`));
             this.syncInterval = this.setInterval(
@@ -507,6 +553,93 @@ class MqttPlus extends utils.Adapter {
         }
     }
 
+    // Lädt das gespeicherte Remote-Sync-Template. Ein unbestätigter Wert (ack=false) wurde geschrieben,
+    // während der Adapter nicht lief - er wird wie ein laufender Schreibzugriff geprüft.
+    private async loadSyncTemplate(): Promise<void> {
+        this.syncTemplate = this.getDefaultSyncTemplate();
+        try {
+            const state = await this.getStateAsync("config.syncTemplate");
+            if (!state) {
+                return;
+            }
+            if (!state.ack) {
+                await this.handleSyncTemplateWrite(state.val);
+            } else if (typeof state.val === "string" && state.val.trim()) {
+                this.syncTemplate = state.val;
+            }
+        } catch (e: any) {
+            this.log.debug(`[Remote Sync] Template state not readable, using default: ${e.message}`);
+        }
+    }
+
+    // Prüft ein Template und übernimmt es (Speicher + State mit ack=true). Liefert bei einem
+    // ungültigen Template die Fehlermeldung, sonst null.
+    private async applySyncTemplate(template: string): Promise<string | null> {
+        const error = this.validateSyncTemplate(template);
+        if (error) {
+            return error;
+        }
+        this.syncTemplate = template;
+        await this.setStateAsync("config.syncTemplate", template, true);
+        return null;
+    }
+
+    // Schreibzugriff auf config.syncTemplate über Admin, Skript oder VIS (ack=false): leer = Standard-
+    // Template. Ein ungültiges Template wird abgelehnt und der vorherige Stand wiederhergestellt,
+    // statt beim nächsten Sync für jeden Eintrag eine Warnung zu erzeugen.
+    private async handleSyncTemplateWrite(val: ioBroker.StateValue): Promise<void> {
+        const template = typeof val === "string" && val.trim() ? val : this.getDefaultSyncTemplate();
+        const error = await this.applySyncTemplate(template);
+        if (error) {
+            this.log.warn(`[Remote Sync] Sync template rejected (${error}) - the previous template stays active.`);
+            await this.setStateAsync("config.syncTemplate", this.syncTemplate, true);
+        } else {
+            this.log.info("[Remote Sync] New sync template applied.");
+        }
+    }
+
+    // Setzt alle Platzhalter eines Templates für einen Mapping-Eintrag ein.
+    private renderSyncTemplate(
+        template: string,
+        entry: Pick<MappingEntry, "id" | "mqttName" | "dir" | "unit">,
+        state: ioBroker.State,
+    ): string {
+        // Platzhalter, die roh in einen JSON-String eingesetzt werden, müssen JSON-escaped werden -
+        // sonst bricht ein Anführungszeichen/Backslash in einer ID das gesamte JSON.
+        const esc = (s: string): string => JSON.stringify(String(s)).slice(1, -1);
+        // Funktions-Ersetzer statt String: ein "$" im Wert würde sonst als
+        // Ersetzungsmuster ($&, $1 ...) interpretiert.
+        return template
+            .replace(/%ID%/g, () => esc(entry.id))
+            .replace(/%MQTT%/g, () => esc(entry.mqttName))
+            .replace(/%PREFIX%/g, () => esc(this.config.targetBasePath))
+            .replace(/%DIR%/g, () => esc(entry.dir))
+            .replace(/%VAL%/g, () => JSON.stringify(state.val))
+            .replace(/%TS%/g, () => String(state.ts))
+            .replace(/%LC%/g, () => String(state.lc ?? state.ts))
+            .replace(/%ACK%/g, () => String(state.ack === true))
+            .replace(/%Q%/g, () => String(state.q ?? 0))
+            .replace(/%UNIT%/g, () => esc(entry.unit || ""));
+    }
+
+    // Prüft, ob ein Template mit Beispielwerten gültiges JSON ergibt. Liefert die Fehlermeldung oder null.
+    private validateSyncTemplate(template: string): string | null {
+        const now = Date.now();
+        const sample = { val: 1, ack: true, ts: now, lc: now, q: 0, from: "" } as ioBroker.State;
+        try {
+            JSON.parse(
+                this.renderSyncTemplate(
+                    template,
+                    { id: "0_userdata.0.example", mqttName: "example/topic", dir: "out", unit: "" },
+                    sample,
+                ),
+            );
+            return null;
+        } catch (e: any) {
+            return `not valid JSON: ${e.message}`;
+        }
+    }
+
     // Lädt aktive Login-Sperren aus der Persistenz, damit ein Adapter-Neustart eine laufende
     // Brute-Force-Sperre nicht zurücksetzt. Bereits abgelaufene Einträge werden verworfen.
     private async loadAuthLockouts(): Promise<void> {
@@ -696,6 +829,11 @@ class MqttPlus extends utils.Adapter {
     private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
         if (!state) {
             return;
+        }
+
+        // 0. Eigener beschreibbarer State: Remote-Sync-Template
+        if (id === `${this.namespace}.config.syncTemplate` && !state.ack) {
+            await this.handleSyncTemplateWrite(state.val);
         }
 
         // 1. Ist es eine Quelle? (IOB -> MQTT)
@@ -967,6 +1105,30 @@ class MqttPlus extends utils.Adapter {
         return isNaN(n) || n < 0 ? undefined : n;
     }
 
+    // Liest ein Intervall aus der Config und begrenzt es auf [min, max]: leer/ungültig -> fallback.
+    // Ein korrigierter Wert wird gemeldet, damit die tatsächlich verwendete Einstellung sichtbar ist.
+    private readInterval(
+        name: string,
+        raw: number | string | null | undefined,
+        min: number,
+        max: number,
+        fallback: number,
+    ): number {
+        if (raw === undefined || raw === null || String(raw).trim() === "") {
+            return fallback;
+        }
+        const n = Number(raw);
+        if (!Number.isFinite(n)) {
+            this.log.warn(`[Config] ${name}=${String(raw)} is not a number - using ${fallback}.`);
+            return fallback;
+        }
+        const value = Math.min(Math.max(min, n), max);
+        if (value !== n) {
+            this.log.warn(`[Config] ${name}=${n} is outside the allowed range ${min}-${max} - using ${value}.`);
+        }
+        return value;
+    }
+
     // Aktualitätsgrenze in ms für ein Mapping: Eintrag im Mapping vor globalem Wert, 0 = aus.
     private getStaleLimitMs(entry: MappingEntry): number {
         const perMapping = this.parseMinutes(entry.staleAfterMin);
@@ -1129,6 +1291,16 @@ class MqttPlus extends utils.Adapter {
         }
     }
 
+    // Rolle für einen MQTT-Ziel-State (read=true, write=true): die Rolle der Quelle, sofern sie laut
+    // stateroles.md lesbar und beschreibbar ist und zum Typ passt - sonst die generische Rolle "state".
+    private toReadWriteRole(role: string | undefined, type: ioBroker.CommonType): string {
+        if (!role) {
+            return "state";
+        }
+        const allowedTypes = MqttPlus.READ_WRITE_ROLES.get(role.split(".")[0]);
+        return allowedTypes && allowedTypes.includes(type) ? role : "state";
+    }
+
     private async ensureAdapterObject(sourceId: string, targetPath: string, mappingUnit?: string): Promise<void> {
         const parts = targetPath.split(".");
         if (parts.length < 2) {
@@ -1156,21 +1328,22 @@ class MqttPlus extends utils.Adapter {
 
         try {
             const finalExists = await this.getForeignObjectAsync(targetPath);
+            const ownName = `${MqttPlus.TARGET_NAME_PREFIX}${sourceId}`;
             if (!finalExists) {
                 const sObj = await this.getForeignObjectAsync(sourceId);
                 let type: ioBroker.CommonType = "mixed";
-                let role = "variable";
+                let role: string | undefined;
                 let unit = mappingUnit;
 
                 if (sObj && sObj.common) {
                     type = sObj.common.type || "mixed";
-                    role = sObj.common.role || "variable";
+                    role = sObj.common.role;
                     if (!unit) {
                         unit = sObj.common.unit;
                     }
                 }
 
-                if (targetPath.includes("Switch") || targetPath.includes("Schalter")) {
+                if (targetPath.includes("Switch")) {
                     type = "boolean";
                     role = "switch";
                 }
@@ -1179,10 +1352,12 @@ class MqttPlus extends utils.Adapter {
                     _id: targetPath,
                     type: "state",
                     common: {
-                        name: `Export of ${sourceId}`,
+                        name: ownName,
                         type: type,
-                        role: role,
+                        role: this.toReadWriteRole(role, type),
                         unit: unit,
+                        // Ein MQTT-Topic ist lesbar und beschreibbar: mqtt-plus schreibt mit ack=false,
+                        // der MQTT-Adapter veröffentlicht den Wert daraufhin beim Broker.
                         read: true,
                         write: true,
                     },
@@ -1192,7 +1367,15 @@ class MqttPlus extends utils.Adapter {
                 this.targetTypeCache.set(targetPath, type);
                 await this.waitForObject(targetPath);
             } else if (finalExists.common) {
-                this.targetTypeCache.set(targetPath, finalExists.common.type || "mixed");
+                const type = finalExists.common.type || "mixed";
+                this.targetTypeCache.set(targetPath, type);
+                // Bis 1.6.5 angelegte Ziele konnten eine Rolle tragen, die nicht zu read/write passt
+                // ("variable" oder z.B. value.* von der Quelle). Nur selbst angelegte Objekte korrigieren.
+                const role = this.toReadWriteRole(finalExists.common.role, type);
+                if (finalExists.common.name === ownName && role !== finalExists.common.role) {
+                    await this.extendForeignObjectAsync(targetPath, { common: { role } });
+                    this.log.info(`[Setup] Role of ${targetPath} corrected: "${finalExists.common.role}" -> "${role}"`);
+                }
             }
         } catch (e: any) {
             this.log.debug(`[Setup] Target object ${targetPath} skipped: ${e.message}`);
@@ -1500,19 +1683,7 @@ class MqttPlus extends utils.Adapter {
         }
         const encodedUrl = parsedUrl.toString();
 
-        let templateStr = this.getDefaultSyncTemplate();
-        try {
-            const tplState = await this.getStateAsync("config.syncTemplate");
-            if (tplState && tplState.val) {
-                templateStr = tplState.val as string;
-            }
-        } catch (e: any) {
-            this.log.debug(`[Remote Sync] Template state not readable, using default: ${e.message}`);
-        }
-
-        // Platzhalter, die roh in einen JSON-String eingesetzt werden, müssen JSON-escaped werden -
-        // sonst bricht ein Anführungszeichen/Backslash in einer ID das gesamte JSON.
-        const esc = (s: string): string => JSON.stringify(String(s)).slice(1, -1);
+        const templateStr = this.syncTemplate || this.getDefaultSyncTemplate();
 
         const mappings = this.config.mappings || [];
         const payload: any[] = [];
@@ -1526,19 +1697,7 @@ class MqttPlus extends utils.Adapter {
                         skippedStale++;
                         continue;
                     }
-                    // Funktions-Ersetzer statt String: ein "$" im Wert würde sonst als
-                    // Ersetzungsmuster ($&, $1 ...) interpretiert.
-                    const itemStr = templateStr
-                        .replace(/%ID%/g, () => esc(entry.id))
-                        .replace(/%MQTT%/g, () => esc(entry.mqttName))
-                        .replace(/%PREFIX%/g, () => esc(this.config.targetBasePath))
-                        .replace(/%DIR%/g, () => esc(entry.dir))
-                        .replace(/%VAL%/g, () => JSON.stringify(state.val))
-                        .replace(/%TS%/g, () => String(state.ts))
-                        .replace(/%LC%/g, () => String(state.lc ?? state.ts))
-                        .replace(/%ACK%/g, () => String(state.ack === true))
-                        .replace(/%Q%/g, () => String(state.q ?? 0))
-                        .replace(/%UNIT%/g, () => esc(entry.unit || ""));
+                    const itemStr = this.renderSyncTemplate(templateStr, entry, state);
 
                     try {
                         payload.push(JSON.parse(itemStr));
@@ -1600,7 +1759,7 @@ class MqttPlus extends utils.Adapter {
             }
 
             const staleInfo = skippedStale ? `, ${skippedStale} inactive skipped` : "";
-            const msg = `OK: ${payload.length} values sent${staleInfo} (${new Date().toLocaleTimeString()})`;
+            const msg = `OK: ${payload.length} values sent${staleInfo} (${this.formatClockTime()})`;
             await this.setStateAsync("info.lastSyncStatus", msg, true);
             this.log.debug(`Remote Sync (${payload.length}) OK.`);
 
@@ -1621,7 +1780,7 @@ class MqttPlus extends utils.Adapter {
                 payload.length > MqttPlus.REMOTE_SYNC_CHUNK_SIZE
                     ? ` (${sentCount}/${payload.length} values transmitted)`
                     : "";
-            const fullMsg = `Error${progress}: ${errorMsg} (${new Date().toLocaleTimeString()})`;
+            const fullMsg = `Error${progress}: ${errorMsg} (${this.formatClockTime()})`;
 
             this.log.error(`Remote Sync Error: ${fullMsg} | URL: ${encodedUrl}`);
             await this.setStateAsync("info.lastSyncStatus", fullMsg, true);
@@ -1811,12 +1970,11 @@ class MqttPlus extends utils.Adapter {
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(exportData, null, 2));
                     } else if (pathname === "/api/status") {
-                        const syncTemplateState = await this.getStateAsync("config.syncTemplate");
                         const status = {
                             watchdog: this.currentWatchdogStatus,
                             uptime: process.uptime(),
                             mappings: this.config.mappings ? this.config.mappings.length : 0,
-                            syncTemplate: syncTemplateState ? syncTemplateState.val : this.getDefaultSyncTemplate(),
+                            syncTemplate: this.syncTemplate || this.getDefaultSyncTemplate(),
                         };
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(status));
@@ -1827,14 +1985,18 @@ class MqttPlus extends utils.Adapter {
                         } // Fehlerantwort wurde bereits gesendet
                         try {
                             const data = JSON.parse(body);
-                            if (data.template) {
-                                await this.setStateAsync("config.syncTemplate", data.template, true);
-                                this.log.info("New remote sync template saved.");
-                                res.writeHead(200, { "Content-Type": "application/json" });
-                                res.end(JSON.stringify({ success: true }));
-                            } else {
+                            if (typeof data.template !== "string" || !data.template.trim()) {
                                 throw new Error("No template received");
                             }
+                            const error = await this.applySyncTemplate(data.template);
+                            if (error) {
+                                res.writeHead(400, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({ success: false, error: `Template ${error}` }));
+                                return;
+                            }
+                            this.log.info("New remote sync template saved.");
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ success: true }));
                         } catch (e: any) {
                             res.writeHead(500, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ success: false, error: e.message }));
@@ -2120,6 +2282,12 @@ class MqttPlus extends utils.Adapter {
         `;
     }
 
+    // Uhrzeit HH:MM:SS (lokale Zeitzone) für Text-States - unabhängig von der Server-Locale,
+    // anders als toLocaleTimeString() (z.B. "7:23:45 PM" oder "19:23:45 Uhr").
+    private formatClockTime(): string {
+        return new Date().toTimeString().slice(0, 8);
+    }
+
     private getDefaultSyncTemplate(): string {
         return '{"id": "%ID%", "topic": "%MQTT%", "value": %VAL%, "ts": %TS%, "unit": "%UNIT%", "prefix": "%PREFIX%", "dir": "%DIR%"}';
     }
@@ -2143,10 +2311,9 @@ class MqttPlus extends utils.Adapter {
 
         this.lastWatchdogStatus = status;
         this.lastWatchdogWriteTs = now;
-        this.currentWatchdogStatus = `${status} (${new Date().toLocaleTimeString()})`;
+        this.currentWatchdogStatus = `${status} (${this.formatClockTime()})`;
         void this.setState("watchdog", this.currentWatchdogStatus, true);
-        // Maschinenlesbare Variante zusätzlich zum lokalisierten Text-State: reiner Status-String
-        // plus Unix-Timestamp statt serverlokalem toLocaleTimeString().
+        // Maschinenlesbare Variante zusätzlich zum Text-State: reiner Status-String plus Unix-Timestamp.
         void this.setState("info.status", status, true);
         if (!isCycleEnd) {
             void this.setState("info.lastCycle", now, true);
