@@ -65,3 +65,7 @@ The script bumps the version in `package.json` and `io-package.json`, creates th
 entry, turns the placeholder into `### <version> (<date>)`, runs `npm run build`, commits, tags and
 pushes. The pushed tag starts the GitHub workflow, which publishes the release to npm. Translations
 for the news entry can be generated with `npm run translate`.
+
+The commit message of the release commit must not contain the text `[skip ci]` anywhere (not even
+as a quotation): GitHub then does not start the workflow for the commit or its tag, and nothing is
+published.
