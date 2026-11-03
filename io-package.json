@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "mqtt-plus",
-    "version": "1.6.7",
+    "version": "1.6.8",
     "news": {
+      "1.6.8": {
+        "en": "Release is now published by GitHub Actions with npm provenance (Trusted Publishing); no functional changes",
+        "de": "Release wird jetzt über GitHub Actions mit npm-Provenance (Trusted Publishing) veröffentlicht; keine funktionalen Änderungen",
+        "ru": "Релиз теперь публикуется через GitHub Actions с npm provenance (Trusted Publishing); функциональных изменений нет",
+        "pt": "A versão é agora publicada pelo GitHub Actions com proveniência npm (Trusted Publishing); sem alterações funcionais",
+        "nl": "Release wordt nu via GitHub Actions gepubliceerd met npm-provenance (Trusted Publishing); geen functionele wijzigingen",
+        "fr": "La version est désormais publiée par GitHub Actions avec la provenance npm (Trusted Publishing) ; aucune modification fonctionnelle",
+        "it": "La release viene ora pubblicata tramite GitHub Actions con provenienza npm (Trusted Publishing); nessuna modifica funzionale",
+        "es": "La versión ahora se publica mediante GitHub Actions con procedencia npm (Trusted Publishing); sin cambios funcionales",
+        "pl": "Wydanie jest teraz publikowane przez GitHub Actions z pochodzeniem npm (Trusted Publishing); brak zmian funkcjonalnych",
+        "uk": "Реліз тепер публікується через GitHub Actions з npm provenance (Trusted Publishing); функціональних змін немає",
+        "zh-cn": "版本现通过 GitHub Actions 以 npm 来源证明（Trusted Publishing）发布；无功能变更"
+      },
       "1.6.7": {
         "en": "Target states created by versions up to 1.6.4 ('Export von ...') are recognised and corrected (role, English name); the obsolete object triggerExport is removed; targets of type string receive numbers and booleans as text",
         "de": "Ziel-States aus Versionen bis 1.6.4 ('Export von ...') werden erkannt und korrigiert (Rolle, englischer Name); das veraltete Objekt triggerExport wird entfernt; Ziele vom Typ string erhalten Zahlen und Booleans als Text",
